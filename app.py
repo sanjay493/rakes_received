@@ -281,49 +281,117 @@ def upload():
 
 @app.route("/dashboard", methods=["GET", "POST"])
 def dashboard():
+    from datetime import datetime, timedelta
+    
     session_db = SessionDB()
 
+    # Get all unique values for filters
     sttn_froms = sorted({x[0] for x in session_db.query(Rake.sttn_from).distinct()})
     sttn_tos = sorted({x[0] for x in session_db.query(Rake.sttn_to).distinct()})
     commodities = sorted({x[0] for x in session_db.query(Rake.cmdt).distinct()})
     rake_types = sorted({x[0] for x in session_db.query(Rake.rake_type).distinct()})
 
+    # Default to first unit if available
+    selected_unit = request.args.get("unit") or request.form.get("unit") or (sttn_tos[0] if sttn_tos else None)
+    analysis_type = request.form.get("analysis_type", "last30days")
+    
+    # Filters
+    sttn_from = request.form.get("sttn_from", "")
+    commodity = request.form.get("commodity", "")
+    rake_type = request.form.get("rake_type", "")
+
     graph_html = None
-
-    if request.method == "POST":
-        sttn_from = request.form.getlist("sttn_from")
-        sttn_to = request.form.get("sttn_to")
-        commodity = request.form.get("commodity")
-        rake_type = request.form.get("rake_type")
-        start = request.form.get("startdate")
-        end = request.form.get("enddate")
-        analysis_type = request.form.get("analysis_type")
-
-        query = session_db.query(Rake)
-
+    
+    if selected_unit:
+        # Build query
+        query = session_db.query(Rake).filter(Rake.sttn_to == selected_unit)
+        
         if sttn_from:
-            query = query.filter(Rake.sttn_from.in_(sttn_from))
-        if sttn_to:
-            query = query.filter(Rake.sttn_to == sttn_to)
+            query = query.filter(Rake.sttn_from == sttn_from)
         if commodity:
             query = query.filter(Rake.cmdt == commodity)
         if rake_type:
             query = query.filter(Rake.rake_type == rake_type)
-        if start and end:
-            query = query.filter(Rake.received_time.between(start, end))
-
+        
+        # Date filtering based on analysis type
+        if analysis_type == "last30days":
+            cutoff_date = datetime.now() - timedelta(days=30)
+            query = query.filter(Rake.received_time >= cutoff_date)
+        elif analysis_type == "weekly":
+            cutoff_date = datetime.now() - timedelta(days=90)  # Last ~13 weeks
+            query = query.filter(Rake.received_time >= cutoff_date)
+        elif analysis_type == "fortnightly":
+            cutoff_date = datetime.now() - timedelta(days=120)  # Last ~8 fortnights
+            query = query.filter(Rake.received_time >= cutoff_date)
+        elif analysis_type == "monthly":
+            cutoff_date = datetime.now() - timedelta(days=365)  # Last 12 months
+            query = query.filter(Rake.received_time >= cutoff_date)
+        
         rows = query.all()
         df = query_to_df(rows)
-
-        result = run_analysis(df, analysis_type)
-
-        if "sttn_from" in result.columns and analysis_type in ["daily", "weekly", "fortnightly", "monthly"]:
-            fig = px.line(result, x=result.columns[1], y="transit_time_hrs", color="sttn_from", markers=True)
-        else:
-            fig = px.bar(result, x=result.columns[0], y="transit_time_hrs")
-
-        fig.update_layout(title=analysis_type.upper())
-        graph_html = fig.to_html(full_html=False)
+        
+        if not df.empty:
+            df["received_time"] = pd.to_datetime(df["received_time"])
+            
+            # Generate analysis based on type
+            if analysis_type == "last30days":
+                df["date"] = df["received_time"].dt.date
+                result = df.groupby("date", as_index=False)["transit_time_hrs"].mean()
+                result = result.sort_values("date")
+                
+                fig = px.line(result, x="date", y="transit_time_hrs", markers=True,
+                            title=f"Last 30 Days Transit Time - {selected_unit}")
+                fig.update_xaxes(title_text="Date")
+                
+            elif analysis_type == "weekly":
+                result = (
+                    df.set_index("received_time")
+                      .resample("W")["transit_time_hrs"]
+                      .mean()
+                      .reset_index()
+                )
+                result.columns = ["week", "transit_time_hrs"]
+                result = result.dropna()
+                
+                fig = px.line(result, x="week", y="transit_time_hrs", markers=True,
+                            title=f"Weekly Average Transit Time - {selected_unit}")
+                fig.update_xaxes(title_text="Week")
+                
+            elif analysis_type == "fortnightly":
+                result = (
+                    df.set_index("received_time")
+                      .resample("2W")["transit_time_hrs"]
+                      .mean()
+                      .reset_index()
+                )
+                result.columns = ["fortnight", "transit_time_hrs"]
+                result = result.dropna()
+                
+                fig = px.bar(result, x="fortnight", y="transit_time_hrs",
+                           title=f"Fortnightly Average Transit Time - {selected_unit}")
+                fig.update_xaxes(title_text="Fortnight")
+                
+            elif analysis_type == "monthly":
+                result = (
+                    df.set_index("received_time")
+                      .resample("M")["transit_time_hrs"]
+                      .mean()
+                      .reset_index()
+                )
+                result.columns = ["month", "transit_time_hrs"]
+                result = result.dropna()
+                
+                fig = px.bar(result, x="month", y="transit_time_hrs",
+                           title=f"Monthly Average Transit Time - {selected_unit}")
+                fig.update_xaxes(title_text="Month")
+            
+            fig.update_yaxes(title_text="Transit Time (Hours)")
+            fig.update_layout(
+                height=500,
+                hovermode='x unified',
+                showlegend=False
+            )
+            graph_html = fig.to_html(full_html=False)
 
     session_db.close()
 
@@ -333,20 +401,87 @@ def dashboard():
         sttn_tos=sttn_tos,
         commodities=commodities,
         rake_types=rake_types,
+        selected_unit=selected_unit,
+        analysis_type=analysis_type,
+        selected_sttn_from=sttn_from,
+        selected_commodity=commodity,
+        selected_rake_type=rake_type,
         graph_html=graph_html
     )
 
 @app.route("/export", methods=["POST"])
 def export_csv():
+    from datetime import datetime, timedelta
+    
     session_db = SessionDB()
 
-    analysis_type = request.form.get("analysis_type")
+    analysis_type = request.form.get("analysis_type", "last30days")
+    selected_unit = request.form.get("unit")
+    sttn_from = request.form.get("sttn_from", "")
+    commodity = request.form.get("commodity", "")
+    rake_type = request.form.get("rake_type", "")
 
-    rows = session_db.query(Rake).all()
+    # Build query with same filters as dashboard
+    query = session_db.query(Rake)
+    
+    if selected_unit:
+        query = query.filter(Rake.sttn_to == selected_unit)
+    if sttn_from:
+        query = query.filter(Rake.sttn_from == sttn_from)
+    if commodity:
+        query = query.filter(Rake.cmdt == commodity)
+    if rake_type:
+        query = query.filter(Rake.rake_type == rake_type)
+    
+    # Date filtering
+    if analysis_type == "last30days":
+        cutoff_date = datetime.now() - timedelta(days=30)
+        query = query.filter(Rake.received_time >= cutoff_date)
+    elif analysis_type == "weekly":
+        cutoff_date = datetime.now() - timedelta(days=90)
+        query = query.filter(Rake.received_time >= cutoff_date)
+    elif analysis_type == "fortnightly":
+        cutoff_date = datetime.now() - timedelta(days=120)
+        query = query.filter(Rake.received_time >= cutoff_date)
+    elif analysis_type == "monthly":
+        cutoff_date = datetime.now() - timedelta(days=365)
+        query = query.filter(Rake.received_time >= cutoff_date)
+
+    rows = query.all()
     session_db.close()
 
     df = query_to_df(rows)
-    result = run_analysis(df, analysis_type)
+    
+    if not df.empty:
+        df["received_time"] = pd.to_datetime(df["received_time"])
+        
+        # Generate analysis based on type
+        if analysis_type == "last30days":
+            df["date"] = df["received_time"].dt.date
+            result = df.groupby("date", as_index=False)["transit_time_hrs"].mean()
+        elif analysis_type == "weekly":
+            result = (
+                df.set_index("received_time")
+                  .resample("W")["transit_time_hrs"]
+                  .mean()
+                  .reset_index()
+            )
+        elif analysis_type == "fortnightly":
+            result = (
+                df.set_index("received_time")
+                  .resample("2W")["transit_time_hrs"]
+                  .mean()
+                  .reset_index()
+            )
+        elif analysis_type == "monthly":
+            result = (
+                df.set_index("received_time")
+                  .resample("M")["transit_time_hrs"]
+                  .mean()
+                  .reset_index()
+            )
+    else:
+        result = df
 
     buffer = io.StringIO()
     result.to_csv(buffer, index=False)
@@ -356,7 +491,7 @@ def export_csv():
         io.BytesIO(buffer.getvalue().encode()),
         mimetype="text/csv",
         as_attachment=True,
-        download_name=f"{analysis_type}_analysis.csv"
+        download_name=f"{analysis_type}_analysis_{selected_unit or 'all'}.csv"
     )
 
 # ------------------ RUN ------------------

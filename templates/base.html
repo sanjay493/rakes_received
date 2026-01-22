@@ -26,14 +26,85 @@
             margin-bottom: 20px;
             box-shadow: 0 0 10px rgba(0,0,0,0.1);
         }
+        
+        /* Unit Buttons */
+        .unit-buttons {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            margin-top: 15px;
+        }
+        .unit-btn {
+            padding: 12px 24px;
+            background: #e8eef5;
+            color: #1f3a5f;
+            text-decoration: none;
+            border-radius: 6px;
+            font-weight: bold;
+            border: 2px solid transparent;
+            transition: all 0.3s ease;
+        }
+        .unit-btn:hover {
+            background: #d0dce8;
+            transform: translateY(-2px);
+        }
+        .unit-btn.active {
+            background: #1f3a5f;
+            color: white;
+            border-color: #1f3a5f;
+            box-shadow: 0 4px 8px rgba(31, 58, 95, 0.3);
+        }
+        
         label {
             font-weight: bold;
+            display: block;
+            margin-bottom: 5px;
         }
         select, input, button {
-            padding: 8px;
+            padding: 10px;
             margin: 5px 0;
             width: 100%;
-            max-width: 350px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        select:focus, input:focus {
+            outline: none;
+            border-color: #1f3a5f;
+            box-shadow: 0 0 0 2px rgba(31, 58, 95, 0.1);
+        }
+        
+        /* Button Styles */
+        .button-group {
+            display: flex;
+            gap: 10px;
+        }
+        .btn-primary, .btn-secondary {
+            padding: 12px 24px;
+            border: none;
+            cursor: pointer;
+            border-radius: 4px;
+            font-weight: bold;
+            font-size: 14px;
+            transition: all 0.3s ease;
+        }
+        .btn-primary {
+            background: #1f3a5f;
+            color: white;
+        }
+        .btn-primary:hover {
+            background: #162c46;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+        }
+        .btn-secondary {
+            background: #4a90e2;
+            color: white;
+        }
+        .btn-secondary:hover {
+            background: #357abd;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.2);
         }
         button {
             background: #1f3a5f;
@@ -45,14 +116,16 @@
         button:hover {
             background: #162c46;
         }
-        .grid {
+        
+        .filter-grid {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-            gap: 15px;
+            gap: 20px;
+            margin-top: 15px;
         }
         .graph-box {
             background: white;
-            padding: 15px;
+            padding: 20px;
             border-radius: 6px;
             box-shadow: 0 0 10px rgba(0,0,0,0.1);
         }
@@ -68,7 +141,13 @@
 <body>
 
 <header>
-    <h2>🚆 Transit Time Analytics Dashboard</h2>
+    <div style="display: flex; justify-content: space-between; align-items: center;">
+        <h2>🚆 Transit Time Analytics Dashboard</h2>
+        <nav style="display: flex; gap: 20px;">
+            <a href="/" style="color: white; text-decoration: none; padding: 8px 16px; background: rgba(255,255,255,0.1); border-radius: 4px;">Upload</a>
+            <a href="/dashboard" style="color: white; text-decoration: none; padding: 8px 16px; background: rgba(255,255,255,0.1); border-radius: 4px;">Dashboard</a>
+        </nav>
+    </div>
 </header>
 
 <div class="container">

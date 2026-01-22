@@ -1,28 +1,32 @@
 {% extends "base.html" %}
 {% block content %}
 
+<!-- Unit Selection Buttons -->
 <div class="card">
-    <h3>Filters & Analysis</h3>
+    <h3>Select Unit (Destination Station)</h3>
+    <div class="unit-buttons">
+        {% for unit in sttn_tos %}
+        <a href="?unit={{ unit }}" class="unit-btn {% if unit == selected_unit %}active{% endif %}">
+            {{ unit }}
+        </a>
+        {% endfor %}
+    </div>
+</div>
+
+<!-- Filters & Analysis -->
+<div class="card">
+    <h3>Filters & Analysis for {{ selected_unit }}</h3>
 
     <form method="POST" action="/dashboard">
+        <input type="hidden" name="unit" value="{{ selected_unit }}">
 
-        <div class="grid">
-
+        <div class="filter-grid">
             <div>
-                <label>Source Station (Multi-select)</label>
-                <select name="sttn_from" multiple>
+                <label>Source Station</label>
+                <select name="sttn_from">
+                    <option value="">All Sources</option>
                     {% for s in sttn_froms %}
-                    <option value="{{ s }}">{{ s }}</option>
-                    {% endfor %}
-                </select>
-            </div>
-
-            <div>
-                <label>Destination Station</label>
-                <select name="sttn_to">
-                    <option value="">All</option>
-                    {% for s in sttn_tos %}
-                    <option value="{{ s }}">{{ s }}</option>
+                    <option value="{{ s }}" {% if s == selected_sttn_from %}selected{% endif %}>{{ s }}</option>
                     {% endfor %}
                 </select>
             </div>
@@ -30,9 +34,9 @@
             <div>
                 <label>Commodity</label>
                 <select name="commodity">
-                    <option value="">All</option>
+                    <option value="">All Commodities</option>
                     {% for c in commodities %}
-                    <option value="{{ c }}">{{ c }}</option>
+                    <option value="{{ c }}" {% if c == selected_commodity %}selected{% endif %}>{{ c }}</option>
                     {% endfor %}
                 </select>
             </div>
@@ -40,49 +44,35 @@
             <div>
                 <label>Rake Type</label>
                 <select name="rake_type">
-                    <option value="">All</option>
+                    <option value="">All Rake Types</option>
                     {% for r in rake_types %}
-                    <option value="{{ r }}">{{ r }}</option>
+                    <option value="{{ r }}" {% if r == selected_rake_type %}selected{% endif %}>{{ r }}</option>
                     {% endfor %}
                 </select>
             </div>
 
             <div>
-                <label>Start Date</label>
-                <input type="date" name="startdate">
-            </div>
-
-            <div>
-                <label>End Date</label>
-                <input type="date" name="enddate">
-            </div>
-
-            <div>
-                <label>Analysis Type</label>
+                <label>Analysis Period</label>
                 <select name="analysis_type" required>
-                    <option value="daily">Daily Average</option>
-                    <option value="weekly">Weekly Average</option>
-                    <option value="fortnightly">Fortnightly Average</option>
-                    <option value="monthly">Monthly Average</option>
-                    <option value="commodity">Commodity-wise</option>
-                    <option value="source">Source-wise</option>
-                    <option value="rake_type">Rake-Type-wise</option>
-                    <option value="bottleneck">Bottlenecks</option>
+                    <option value="last30days" {% if analysis_type == 'last30days' %}selected{% endif %}>Last 30 Days (Daily)</option>
+                    <option value="weekly" {% if analysis_type == 'weekly' %}selected{% endif %}>Weekly Average (Last 3 Months)</option>
+                    <option value="fortnightly" {% if analysis_type == 'fortnightly' %}selected{% endif %}>Fortnightly Average (Last 4 Months)</option>
+                    <option value="monthly" {% if analysis_type == 'monthly' %}selected{% endif %}>Monthly Average (Last Year)</option>
                 </select>
             </div>
-
         </div>
 
         <br>
-        <button type="submit">Run Analysis</button>
-        <button formaction="/export" formmethod="POST">Download CSV</button>
-
+        <div class="button-group">
+            <button type="submit" class="btn-primary">Run Analysis</button>
+            <button type="submit" formaction="/export" formmethod="POST" class="btn-secondary">Download CSV</button>
+        </div>
     </form>
 </div>
 
+<!-- Graph Display -->
 {% if graph_html %}
 <div class="graph-box">
-    <h3>Result</h3>
     {{ graph_html | safe }}
 </div>
 {% endif %}
