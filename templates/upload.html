@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="card">
+    <h3>Upload Raw CSV File</h3>
+    <form method="POST" enctype="multipart/form-data">
+        <label>Select CSV File</label><br>
+        <input type="file" name="file" required>
+        <br><br>
+        <button type="submit">Upload, Clean & Store</button>
+    </form>
+</div>
+
+{% endblock %}

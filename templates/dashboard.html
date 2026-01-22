@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="card">
+    <h3>Filters & Analysis</h3>
+
+    <form method="POST" action="/dashboard">
+
+        <div class="grid">
+
+            <div>
+                <label>Source Station (Multi-select)</label>
+                <select name="sttn_from" multiple>
+                    {% for s in sttn_froms %}
+                    <option value="{{ s }}">{{ s }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div>
+                <label>Destination Station</label>
+                <select name="sttn_to">
+                    <option value="">All</option>
+                    {% for s in sttn_tos %}
+                    <option value="{{ s }}">{{ s }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div>
+                <label>Commodity</label>
+                <select name="commodity">
+                    <option value="">All</option>
+                    {% for c in commodities %}
+                    <option value="{{ c }}">{{ c }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div>
+                <label>Rake Type</label>
+                <select name="rake_type">
+                    <option value="">All</option>
+                    {% for r in rake_types %}
+                    <option value="{{ r }}">{{ r }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div>
+                <label>Start Date</label>
+                <input type="date" name="startdate">
+            </div>
+
+            <div>
+                <label>End Date</label>
+                <input type="date" name="enddate">
+            </div>
+
+            <div>
+                <label>Analysis Type</label>
+                <select name="analysis_type" required>
+                    <option value="daily">Daily Average</option>
+                    <option value="weekly">Weekly Average</option>
+                    <option value="fortnightly">Fortnightly Average</option>
+                    <option value="monthly">Monthly Average</option>
+                    <option value="commodity">Commodity-wise</option>
+                    <option value="source">Source-wise</option>
+                    <option value="rake_type">Rake-Type-wise</option>
+                    <option value="bottleneck">Bottlenecks</option>
+                </select>
+            </div>
+
+        </div>
+
+        <br>
+        <button type="submit">Run Analysis</button>
+        <button formaction="/export" formmethod="POST">Download CSV</button>
+
+    </form>
+</div>
+
+{% if graph_html %}
+<div class="graph-box">
+    <h3>Result</h3>
+    {{ graph_html | safe }}
+</div>
+{% endif %}
+
+{% endblock %}

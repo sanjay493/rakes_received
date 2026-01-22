@@ -1,0 +1,264 @@
+from flask import Flask, render_template, request, redirect, send_file
+import pandas as pd
+import plotly.express as px
+import os, io
+
+from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, UniqueConstraint
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker
+
+# ------------------ APP SETUP ------------------
+
+app = Flask(__name__)
+
+UPLOAD_FOLDER = "uploads"
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+
+# ------------------ DATABASE ------------------
+
+Base = declarative_base()
+
+class Rake(Base):
+    __tablename__ = "rakes"
+
+    id = Column(Integer, primary_key=True)
+    sr_no = Column(String)
+
+    received_time = Column(DateTime, index=True)
+    dispatched_time = Column(DateTime)
+
+    transit_time = Column(String)
+    transit_time_hrs = Column(Float)
+
+    sttn_from = Column(String, index=True)
+    sttn_to = Column(String, index=True)
+
+    cmdt = Column(String, index=True)
+    rake_type = Column(String, index=True)
+
+    totl_unts = Column(Integer)
+
+    __table_args__ = (
+        UniqueConstraint("received_time", "sttn_from", "sttn_to", name="uq_rake"),
+    )
+
+engine = create_engine("sqlite:///rake_data.db")
+Base.metadata.create_all(engine)
+SessionDB = sessionmaker(bind=engine)
+
+# ------------------ CLEANING ------------------
+
+
+# ------------------ INSERT WITH DEDUP ------------------
+
+def insert_cleaned_data(df):
+    session_db = SessionDB()
+    inserted = 0
+    skipped = 0
+
+    for _, row in df.iterrows():
+        record = Rake(
+            sr_no=row["sr_no"],
+            received_time=row["received_time"],
+            dispatched_time=row["dispatched_time"],
+            transit_time=row["transit_time"],
+            transit_time_hrs=row["transit_time_hrs"],
+            sttn_from=row["sttn_from"],
+            sttn_to=row["sttn_to"],
+            cmdt=row["cmdt"],
+            rake_type=row["rake_type"],
+            totl_unts=row["totl_unts"]
+        )
+
+        try:
+            session_db.add(record)
+            session_db.flush()
+            inserted += 1
+        except:
+            session_db.rollback()
+            skipped += 1
+
+    session_db.commit()
+    session_db.close()
+    return inserted, skipped
+
+# ------------------ ANALYTICS ------------------
+
+def query_to_df(rows):
+    return pd.DataFrame([{
+        "received_time": r.received_time,
+        "transit_time_hrs": r.transit_time_hrs,
+        "sttn_from": r.sttn_from,
+        "sttn_to": r.sttn_to,
+        "cmdt": r.cmdt,
+        "rake_type": r.rake_type
+    } for r in rows])
+def run_analysis(df, analysis_type):
+    if df.empty:
+        return df
+
+    df["received_time"] = pd.to_datetime(df["received_time"])
+
+    # ---------------- Daily (Source-wise) ----------------
+    if analysis_type == "daily":
+        df["date"] = df["received_time"].dt.date
+        return (
+            df.groupby(["sttn_from", "date"], as_index=False)["transit_time_hrs"]
+            .mean()
+        )
+
+    # ---------------- Weekly (Source-wise) ----------------
+    if analysis_type == "weekly":
+        return (
+            df.set_index("received_time")
+              .groupby("sttn_from")
+              .resample("W")["transit_time_hrs"]
+              .mean()
+              .reset_index()
+        )
+
+    # ---------------- Fortnightly (Source-wise) ----------------
+    if analysis_type == "fortnightly":
+        return (
+            df.set_index("received_time")
+              .groupby("sttn_from")
+              .resample("15D")["transit_time_hrs"]
+              .mean()
+              .reset_index()
+        )
+
+    # ---------------- Monthly (Source-wise) ----------------
+    if analysis_type == "monthly":
+        return (
+            df.set_index("received_time")
+              .groupby("sttn_from")
+              .resample("M")["transit_time_hrs"]
+              .mean()
+              .reset_index()
+        )
+
+    # ---------------- Commodity-wise ----------------
+    if analysis_type == "commodity":
+        return df.groupby("cmdt", as_index=False)["transit_time_hrs"].mean()
+
+    # ---------------- Source-wise ----------------
+    if analysis_type == "source":
+        return df.groupby("sttn_from", as_index=False)["transit_time_hrs"].mean()
+
+    # ---------------- Rake Type-wise ----------------
+    if analysis_type == "rake_type":
+        return df.groupby("rake_type", as_index=False)["transit_time_hrs"].mean()
+
+    # ---------------- Bottleneck ----------------
+    if analysis_type == "bottleneck":
+        return (
+            df.groupby(["sttn_from", "sttn_to"], as_index=False)["transit_time_hrs"]
+              .mean()
+              .sort_values("transit_time_hrs", ascending=False)
+              .head(10)
+        )
+
+    return df
+
+# ------------------ ROUTES ------------------
+
+@app.route("/", methods=["GET", "POST"])
+def upload():
+    if request.method == "POST":
+        file = request.files["file"]
+        filepath = os.path.join(UPLOAD_FOLDER, file.filename)
+        file.save(filepath)
+
+        df_raw = pd.read_csv(filepath)
+        df_clean = clean_data(df_raw)
+
+        inserted, skipped = insert_cleaned_data(df_clean)
+
+        return redirect("/dashboard")
+
+    return render_template("upload.html")
+
+@app.route("/dashboard", methods=["GET", "POST"])
+def dashboard():
+    session_db = SessionDB()
+
+    sttn_froms = sorted({x[0] for x in session_db.query(Rake.sttn_from).distinct()})
+    sttn_tos = sorted({x[0] for x in session_db.query(Rake.sttn_to).distinct()})
+    commodities = sorted({x[0] for x in session_db.query(Rake.cmdt).distinct()})
+    rake_types = sorted({x[0] for x in session_db.query(Rake.rake_type).distinct()})
+
+    graph_html = None
+
+    if request.method == "POST":
+        sttn_from = request.form.getlist("sttn_from")
+        sttn_to = request.form.get("sttn_to")
+        commodity = request.form.get("commodity")
+        rake_type = request.form.get("rake_type")
+        start = request.form.get("startdate")
+        end = request.form.get("enddate")
+        analysis_type = request.form.get("analysis_type")
+
+        query = session_db.query(Rake)
+
+        if sttn_from:
+            query = query.filter(Rake.sttn_from.in_(sttn_from))
+        if sttn_to:
+            query = query.filter(Rake.sttn_to == sttn_to)
+        if commodity:
+            query = query.filter(Rake.cmdt == commodity)
+        if rake_type:
+            query = query.filter(Rake.rake_type == rake_type)
+        if start and end:
+            query = query.filter(Rake.received_time.between(start, end))
+
+        rows = query.all()
+        df = query_to_df(rows)
+
+        result = run_analysis(df, analysis_type)
+
+        if analysis_type in ["daily", "weekly", "fortnightly", "monthly"]:
+            fig = px.line(result, x=result.columns[0], y="transit_time_hrs", markers=True)
+        else:
+            fig = px.bar(result, x=result.columns[0], y="transit_time_hrs")
+
+        fig.update_layout(title=analysis_type.upper())
+        graph_html = fig.to_html(full_html=False)
+
+    session_db.close()
+
+    return render_template(
+        "dashboard.html",
+        sttn_froms=sttn_froms,
+        sttn_tos=sttn_tos,
+        commodities=commodities,
+        rake_types=rake_types,
+        graph_html=graph_html
+    )
+
+@app.route("/export", methods=["POST"])
+def export_csv():
+    session_db = SessionDB()
+
+    analysis_type = request.form.get("analysis_type")
+
+    rows = session_db.query(Rake).all()
+    session_db.close()
+
+    df = query_to_df(rows)
+    result = run_analysis(df, analysis_type)
+
+    buffer = io.StringIO()
+    result.to_csv(buffer, index=False)
+    buffer.seek(0)
+
+    return send_file(
+        io.BytesIO(buffer.getvalue().encode()),
+        mimetype="text/csv",
+        as_attachment=True,
+        download_name=f"{analysis_type}_analysis.csv"
+    )
+
+# ------------------ RUN ------------------
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=5000, debug=True)

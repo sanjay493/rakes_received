@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Filters</title>
+</head>
+<body>
+    <h2>Select Filters</h2>
+
+    <form method="POST" action="/plot">
+        <input type="hidden" name="filepath" value="{{ filepath }}">
+
+        <label>Station From:</label>
+        <select name="stationfrom">
+            {% for s in stationfroms %}
+                <option value="{{ s }}">{{ s }}</option>
+            {% endfor %}
+        </select>
+
+        <br><br>
+
+        <label>Station To:</label>
+        <select name="stationto">
+            {% for s in stationtos %}
+                <option value="{{ s }}">{{ s }}</option>
+            {% endfor %}
+        </select>
+
+        <br><br>
+
+        <label>Start Date:</label>
+        <input type="date" name="startdate" required>
+
+        <br><br>
+
+        <label>End Date:</label>
+        <input type="date" name="enddate" required>
+
+        <br><br>
+
+        <button type="submit">Generate Graph</button>
+    </form>
+</body>
+</html>
