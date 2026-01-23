@@ -1,13 +1,14 @@
-from flask import Flask, render_template, request, redirect, send_file
+from flask import Flask, render_template, request, redirect, send_file, jsonify
 import pandas as pd
-import plotly.express as px
+import plotly.graph_objs as go
 import os, io
 
 from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, UniqueConstraint
-from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import declarative_base
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.dialects.sqlite import insert
 from sqlalchemy.exc import IntegrityError
+
 # ------------------ APP SETUP ------------------
 
 app = Flask(__name__)
@@ -141,8 +142,7 @@ def insert_cleaned_data(df):
 
         stmt = insert(Rake).values(records)
         stmt = stmt.on_conflict_do_nothing(
-            index_elements=["received_time", "sttn_from", "sttn_to","cmdt", "rake_type", "dispatched_time"
-]
+            index_elements=["received_time", "sttn_from", "sttn_to","cmdt", "rake_type", "dispatched_time"]
         )
 
         result = session.execute(stmt)
@@ -182,8 +182,6 @@ def fallback_insert(session, records):
     session.commit()
     return inserted, skipped
 
-
-
 # ------------------ ANALYTICS ------------------
 
 def query_to_df(rows):
@@ -196,67 +194,81 @@ def query_to_df(rows):
         "rake_type": r.rake_type
     } for r in rows])
 
-def run_analysis(df, analysis_type):
-    if df.empty:
-        return df
+# ------------------ NEW: API ENDPOINTS FOR DYNAMIC FILTERS ------------------
 
-    df["received_time"] = pd.to_datetime(df["received_time"])
-
-    if analysis_type == "daily":
-        df["date"] = df["received_time"].dt.date
-        return df.groupby(["sttn_from", "date"], as_index=False)["transit_time_hrs"].mean()
-
-    if analysis_type == "weekly":
-        return (
-            df.set_index("received_time")
-              .groupby("sttn_from")
-              .resample("W")["transit_time_hrs"]
-              .mean()
-              .reset_index()
-        )
-
-    if analysis_type == "fortnightly":
-        return (
-            df.set_index("received_time")
-              .groupby("sttn_from")
-              .resample("15D")["transit_time_hrs"]
-              .mean()
-              .reset_index()
-        )
-
-    if analysis_type == "monthly":
-        return (
-            df.set_index("received_time")
-              .groupby("sttn_from")
-              .resample("M")["transit_time_hrs"]
-              .mean()
-              .reset_index()
-        )
-
-    if analysis_type == "commodity":
-        return df.groupby("cmdt", as_index=False)["transit_time_hrs"].mean()
-
-    if analysis_type == "source":
-        return df.groupby("sttn_from", as_index=False)["transit_time_hrs"].mean()
-
-    if analysis_type == "rake_type":
-        return df.groupby("rake_type", as_index=False)["transit_time_hrs"].mean()
-
-    if analysis_type == "bottleneck":
-        return (
-            df.groupby(["sttn_from", "sttn_to"], as_index=False)["transit_time_hrs"]
-              .mean()
-              .sort_values("transit_time_hrs", ascending=False)
-              .head(10)
-        )
-
-    return df
+@app.route("/api/get_filters", methods=["POST"])
+def get_filters():
+    """Get dynamically filtered options based on current selections"""
+    data = request.json
+    destination = data.get('destination')
+    source = data.get('source')
+    commodity = data.get('commodity')
+    rake_type = data.get('rake_type')
+    
+    session_db = SessionDB()
+    
+    # Build base query for this destination
+    query = session_db.query(Rake).filter(Rake.sttn_to == destination)
+    
+    # Apply filters progressively to get remaining options
+    if source and source != "All Sources":
+        filtered_sources = query.filter(Rake.sttn_from == source)
+    else:
+        filtered_sources = query
+    
+    if commodity and commodity != "All Commodities":
+        filtered_commodities = query.filter(Rake.cmdt == commodity)
+    else:
+        filtered_commodities = query
+    
+    if rake_type and rake_type != "All Rake Types":
+        filtered_rake_types = query.filter(Rake.rake_type == rake_type)
+    else:
+        filtered_rake_types = query
+    
+    # Get available options based on other selections
+    # For sources: filter by commodity and rake_type
+    sources_query = query
+    if commodity and commodity != "All Commodities":
+        sources_query = sources_query.filter(Rake.cmdt == commodity)
+    if rake_type and rake_type != "All Rake Types":
+        sources_query = sources_query.filter(Rake.rake_type == rake_type)
+    sources = sorted({x[0] for x in sources_query.with_entities(Rake.sttn_from).distinct()})
+    
+    # For commodities: filter by source and rake_type
+    commodities_query = query
+    if source and source != "All Sources":
+        commodities_query = commodities_query.filter(Rake.sttn_from == source)
+    if rake_type and rake_type != "All Rake Types":
+        commodities_query = commodities_query.filter(Rake.rake_type == rake_type)
+    commodities = sorted({x[0] for x in commodities_query.with_entities(Rake.cmdt).distinct()})
+    
+    # For rake_types: filter by source and commodity
+    rake_types_query = query
+    if source and source != "All Sources":
+        rake_types_query = rake_types_query.filter(Rake.sttn_from == source)
+    if commodity and commodity != "All Commodities":
+        rake_types_query = rake_types_query.filter(Rake.cmdt == commodity)
+    rake_types = sorted({x[0] for x in rake_types_query.with_entities(Rake.rake_type).distinct()})
+    
+    session_db.close()
+    
+    return jsonify({
+        'sources': sources,
+        'commodities': commodities,
+        'rake_types': rake_types
+    })
 
 # ------------------ ROUTES ------------------
-@app.route("/", methods=["GET", "POST"])
+
+@app.route("/")
+def index():
+    return redirect("/dashboard")
+
+@app.route("/upload", methods=["GET", "POST"])
 def upload():
     if request.method == "POST":
-        file = request.files["file"]
+        file = request.files.get("file")
         if not file or not file.filename.endswith('.csv'):
             return "Invalid file", 400
 
@@ -285,22 +297,37 @@ def dashboard():
     
     session_db = SessionDB()
 
-    # Get all unique values for filters
-    sttn_froms = sorted({x[0] for x in session_db.query(Rake.sttn_from).distinct()})
+    # Get all unique destinations
     sttn_tos = sorted({x[0] for x in session_db.query(Rake.sttn_to).distinct()})
-    commodities = sorted({x[0] for x in session_db.query(Rake.cmdt).distinct()})
-    rake_types = sorted({x[0] for x in session_db.query(Rake.rake_type).distinct()})
 
     # Default to first unit if available
     selected_unit = request.args.get("unit") or request.form.get("unit") or (sttn_tos[0] if sttn_tos else None)
     analysis_type = request.form.get("analysis_type", "last30days")
     
-    # Filters
+    # Get filters for the selected destination
+    if selected_unit:
+        # Get all available options for this destination
+        base_query = session_db.query(Rake).filter(Rake.sttn_to == selected_unit)
+        sttn_froms = sorted({x[0] for x in base_query.with_entities(Rake.sttn_from).distinct()})
+        commodities = sorted({x[0] for x in base_query.with_entities(Rake.cmdt).distinct()})
+        rake_types = sorted({x[0] for x in base_query.with_entities(Rake.rake_type).distinct()})
+    else:
+        sttn_froms = []
+        commodities = []
+        rake_types = []
+    
+    # Filters from form
     sttn_from = request.form.get("sttn_from", "")
     commodity = request.form.get("commodity", "")
     rake_type = request.form.get("rake_type", "")
 
     graph_html = None
+    outliers_df = pd.DataFrame()  # Initialize empty DataFrame for outliers
+    
+    # Labels for display
+    source_label = sttn_from if sttn_from else "All Sources"
+    commodity_label = commodity if commodity else "All Commodities"
+    rake_type_label = rake_type if rake_type else "All Rake Types"
     
     if selected_unit:
         # Build query
@@ -333,64 +360,273 @@ def dashboard():
         if not df.empty:
             df["received_time"] = pd.to_datetime(df["received_time"])
             
-            # Generate analysis based on type
+            # REQUIREMENT 1: Generate dual-axis chart with bar (rake count) and line (avg transit time)
             if analysis_type == "last30days":
                 df["date"] = df["received_time"].dt.date
-                result = df.groupby("date", as_index=False)["transit_time_hrs"].mean()
+                result = df.groupby("date", as_index=False).agg({
+                    'transit_time_hrs': 'mean',
+                    'sttn_from': 'count'  # Count of rakes
+                })
+                result.columns = ['date', 'avg_transit_time', 'rake_count']
+                result['avg_transit_time'] = result['avg_transit_time'].round(2)  # Round to 2 decimals
                 result = result.sort_values("date")
                 
-                fig = px.line(result, x="date", y="transit_time_hrs", markers=True,
-                            title=f"Last 30 Days Transit Time - {selected_unit}")
-                fig.update_xaxes(title_text="Date")
+                # Detect outliers using IQR method
+                Q1 = df['transit_time_hrs'].quantile(0.25)
+                Q3 = df['transit_time_hrs'].quantile(0.75)
+                IQR = Q3 - Q1
+                lower_bound = Q1 - 1.5 * IQR
+                upper_bound = Q3 + 1.5 * IQR
+                
+                outliers_df = df[(df['transit_time_hrs'] < lower_bound) | (df['transit_time_hrs'] > upper_bound)].copy()
+                outliers_df['received_time'] = outliers_df['received_time'].dt.strftime('%d-%m-%Y %H:%M')
+                outliers_df = outliers_df.sort_values('transit_time_hrs', ascending=False)
+                
+                # Create dual-axis chart
+                fig = go.Figure()
+                
+                # Add bar chart for rake count
+                fig.add_trace(go.Bar(
+                    x=result['date'],
+                    y=result['rake_count'],
+                    name='Rake Count',
+                    marker_color='rgba(100, 181, 246, 0.7)',  # Light blue
+                    yaxis='y2',
+                    text=result['rake_count'],
+                    textposition='outside',
+                    textfont=dict(size=10, color='rgb(33, 150, 243)')
+                ))
+                
+                # Add line chart for average transit time
+                fig.add_trace(go.Scatter(
+                    x=result['date'],
+                    y=result['avg_transit_time'],
+                    name='Avg Transit Time',
+                    mode='lines+markers+text',
+                    line=dict(color='rgb(76, 175, 80)', width=3),  # Green
+                    marker=dict(size=10, color='rgb(76, 175, 80)', line=dict(width=2, color='white')),
+                    text=result['avg_transit_time'],
+                    textposition='top center',
+                    textfont=dict(size=10, color='rgb(56, 142, 60)'),
+                    yaxis='y'
+                ))
+                
+                fig.update_layout(
+                    title=f"Last 30 Days Analysis - {selected_unit}",
+                    xaxis=dict(title="Date"),
+                    yaxis=dict(
+                        title=dict(text="Transit Time (Hours)", font=dict(color="rgb(76, 175, 80)")),
+                        tickfont=dict(color="rgb(76, 175, 80)")
+                    ),
+                    yaxis2=dict(
+                        title=dict(text="Rake Count", font=dict(color="rgb(33, 150, 243)")),
+                        tickfont=dict(color="rgb(33, 150, 243)"),
+                        overlaying='y',
+                        side='right'
+                    ),
+                    hovermode='x unified',
+                    height=550,
+                    legend=dict(x=0.01, y=0.99, bgcolor='rgba(255,255,255,0.8)')
+                )
                 
             elif analysis_type == "weekly":
                 result = (
                     df.set_index("received_time")
-                      .resample("W")["transit_time_hrs"]
-                      .mean()
+                      .resample("W")
+                      .agg({'transit_time_hrs': 'mean', 'sttn_from': 'count'})
                       .reset_index()
                 )
-                result.columns = ["week", "transit_time_hrs"]
+                result.columns = ["week", "avg_transit_time", "rake_count"]
+                result['avg_transit_time'] = result['avg_transit_time'].round(2)  # Round to 2 decimals
                 result = result.dropna()
                 
-                fig = px.line(result, x="week", y="transit_time_hrs", markers=True,
-                            title=f"Weekly Average Transit Time - {selected_unit}")
-                fig.update_xaxes(title_text="Week")
+                # Detect outliers using IQR method
+                Q1 = df['transit_time_hrs'].quantile(0.25)
+                Q3 = df['transit_time_hrs'].quantile(0.75)
+                IQR = Q3 - Q1
+                lower_bound = Q1 - 1.5 * IQR
+                upper_bound = Q3 + 1.5 * IQR
+                
+                outliers_df = df[(df['transit_time_hrs'] < lower_bound) | (df['transit_time_hrs'] > upper_bound)].copy()
+                outliers_df['received_time'] = outliers_df['received_time'].dt.strftime('%d-%m-%Y %H:%M')
+                outliers_df = outliers_df.sort_values('transit_time_hrs', ascending=False)
+                
+                fig = go.Figure()
+                
+                fig.add_trace(go.Bar(
+                    x=result['week'],
+                    y=result['rake_count'],
+                    name='Rake Count',
+                    marker_color='rgba(255, 152, 0, 0.7)',  # Orange
+                    yaxis='y2',
+                    text=result['rake_count'],
+                    textposition='outside',
+                    textfont=dict(size=10, color='rgb(245, 124, 0)')
+                ))
+                
+                fig.add_trace(go.Scatter(
+                    x=result['week'],
+                    y=result['avg_transit_time'],
+                    name='Avg Transit Time',
+                    mode='lines+markers+text',
+                    line=dict(color='rgb(156, 39, 176)', width=3),  # Purple
+                    marker=dict(size=10, color='rgb(156, 39, 176)', line=dict(width=2, color='white')),
+                    text=result['avg_transit_time'],
+                    textposition='top center',
+                    textfont=dict(size=10, color='rgb(123, 31, 162)'),
+                    yaxis='y'
+                ))
+                
+                fig.update_layout(
+                    title=f"Weekly Average Analysis - {selected_unit}",
+                    xaxis=dict(title="Week"),
+                    yaxis=dict(
+                        title=dict(text="Transit Time (Hours)", font=dict(color="rgb(156, 39, 176)")),
+                        tickfont=dict(color="rgb(156, 39, 176)")
+                    ),
+                    yaxis2=dict(
+                        title=dict(text="Rake Count", font=dict(color="rgb(245, 124, 0)")),
+                        tickfont=dict(color="rgb(245, 124, 0)"),
+                        overlaying='y',
+                        side='right'
+                    ),
+                    hovermode='x unified',
+                    height=550,
+                    legend=dict(x=0.01, y=0.99, bgcolor='rgba(255,255,255,0.8)')
+                )
                 
             elif analysis_type == "fortnightly":
                 result = (
                     df.set_index("received_time")
-                      .resample("2W")["transit_time_hrs"]
-                      .mean()
+                      .resample("2W")
+                      .agg({'transit_time_hrs': 'mean', 'sttn_from': 'count'})
                       .reset_index()
                 )
-                result.columns = ["fortnight", "transit_time_hrs"]
+                result.columns = ["fortnight", "avg_transit_time", "rake_count"]
+                result['avg_transit_time'] = result['avg_transit_time'].round(2)  # Round to 2 decimals
                 result = result.dropna()
                 
-                fig = px.bar(result, x="fortnight", y="transit_time_hrs",
-                           title=f"Fortnightly Average Transit Time - {selected_unit}")
-                fig.update_xaxes(title_text="Fortnight")
+                # Detect outliers using IQR method
+                Q1 = df['transit_time_hrs'].quantile(0.25)
+                Q3 = df['transit_time_hrs'].quantile(0.75)
+                IQR = Q3 - Q1
+                lower_bound = Q1 - 1.5 * IQR
+                upper_bound = Q3 + 1.5 * IQR
+                
+                outliers_df = df[(df['transit_time_hrs'] < lower_bound) | (df['transit_time_hrs'] > upper_bound)].copy()
+                outliers_df['received_time'] = outliers_df['received_time'].dt.strftime('%d-%m-%Y %H:%M')
+                outliers_df = outliers_df.sort_values('transit_time_hrs', ascending=False)
+                
+                fig = go.Figure()
+                
+                fig.add_trace(go.Bar(
+                    x=result['fortnight'],
+                    y=result['rake_count'],
+                    name='Rake Count',
+                    marker_color='rgba(255, 87, 34, 0.7)',  # Deep Orange
+                    yaxis='y2',
+                    text=result['rake_count'],
+                    textposition='outside',
+                    textfont=dict(size=10, color='rgb(230, 74, 25)')
+                ))
+                
+                fig.add_trace(go.Scatter(
+                    x=result['fortnight'],
+                    y=result['avg_transit_time'],
+                    name='Avg Transit Time',
+                    mode='lines+markers+text',
+                    line=dict(color='rgb(0, 150, 136)', width=3),  # Teal
+                    marker=dict(size=10, color='rgb(0, 150, 136)', line=dict(width=2, color='white')),
+                    text=result['avg_transit_time'],
+                    textposition='top center',
+                    textfont=dict(size=10, color='rgb(0, 121, 107)'),
+                    yaxis='y'
+                ))
+                
+                fig.update_layout(
+                    title=f"Fortnightly Average Analysis - {selected_unit}",
+                    xaxis=dict(title="Fortnight"),
+                    yaxis=dict(
+                        title=dict(text="Transit Time (Hours)", font=dict(color="rgb(0, 150, 136)")),
+                        tickfont=dict(color="rgb(0, 150, 136)")
+                    ),
+                    yaxis2=dict(
+                        title=dict(text="Rake Count", font=dict(color="rgb(230, 74, 25)")),
+                        tickfont=dict(color="rgb(230, 74, 25)"),
+                        overlaying='y',
+                        side='right'
+                    ),
+                    hovermode='x unified',
+                    height=550,
+                    legend=dict(x=0.01, y=0.99, bgcolor='rgba(255,255,255,0.8)')
+                )
                 
             elif analysis_type == "monthly":
                 result = (
                     df.set_index("received_time")
-                      .resample("M")["transit_time_hrs"]
-                      .mean()
+                      .resample("ME")  # Changed from "M" to "ME" (Month End)
+                      .agg({'transit_time_hrs': 'mean', 'sttn_from': 'count'})
                       .reset_index()
                 )
-                result.columns = ["month", "transit_time_hrs"]
+                result.columns = ["month", "avg_transit_time", "rake_count"]
+                result['avg_transit_time'] = result['avg_transit_time'].round(2)  # Round to 2 decimals
                 result = result.dropna()
                 
-                fig = px.bar(result, x="month", y="transit_time_hrs",
-                           title=f"Monthly Average Transit Time - {selected_unit}")
-                fig.update_xaxes(title_text="Month")
+                # Detect outliers using IQR method
+                Q1 = df['transit_time_hrs'].quantile(0.25)
+                Q3 = df['transit_time_hrs'].quantile(0.75)
+                IQR = Q3 - Q1
+                lower_bound = Q1 - 1.5 * IQR
+                upper_bound = Q3 + 1.5 * IQR
+                
+                outliers_df = df[(df['transit_time_hrs'] < lower_bound) | (df['transit_time_hrs'] > upper_bound)].copy()
+                outliers_df['received_time'] = outliers_df['received_time'].dt.strftime('%d-%m-%Y %H:%M')
+                outliers_df = outliers_df.sort_values('transit_time_hrs', ascending=False)
+                
+                fig = go.Figure()
+                
+                fig.add_trace(go.Bar(
+                    x=result['month'],
+                    y=result['rake_count'],
+                    name='Rake Count',
+                    marker_color='rgba(63, 81, 181, 0.7)',  # Indigo
+                    yaxis='y2',
+                    text=result['rake_count'],
+                    textposition='outside',
+                    textfont=dict(size=10, color='rgb(48, 63, 159)')
+                ))
+                
+                fig.add_trace(go.Scatter(
+                    x=result['month'],
+                    y=result['avg_transit_time'],
+                    name='Avg Transit Time',
+                    mode='lines+markers+text',
+                    line=dict(color='rgb(233, 30, 99)', width=3),  # Pink
+                    marker=dict(size=10, color='rgb(233, 30, 99)', line=dict(width=2, color='white')),
+                    text=result['avg_transit_time'],
+                    textposition='top center',
+                    textfont=dict(size=10, color='rgb(194, 24, 91)'),
+                    yaxis='y'
+                ))
+                
+                fig.update_layout(
+                    title=f"Monthly Average Analysis - {selected_unit}",
+                    xaxis=dict(title="Month"),
+                    yaxis=dict(
+                        title=dict(text="Transit Time (Hours)", font=dict(color="rgb(233, 30, 99)")),
+                        tickfont=dict(color="rgb(233, 30, 99)")
+                    ),
+                    yaxis2=dict(
+                        title=dict(text="Rake Count", font=dict(color="rgb(48, 63, 159)")),
+                        tickfont=dict(color="rgb(48, 63, 159)"),
+                        overlaying='y',
+                        side='right'
+                    ),
+                    hovermode='x unified',
+                    height=550,
+                    legend=dict(x=0.01, y=0.99, bgcolor='rgba(255,255,255,0.8)')
+                )
             
-            fig.update_yaxes(title_text="Transit Time (Hours)")
-            fig.update_layout(
-                height=500,
-                hovermode='x unified',
-                showlegend=False
-            )
             graph_html = fig.to_html(full_html=False)
 
     session_db.close()
@@ -406,7 +642,12 @@ def dashboard():
         selected_sttn_from=sttn_from,
         selected_commodity=commodity,
         selected_rake_type=rake_type,
-        graph_html=graph_html
+        source_label=source_label,
+        commodity_label=commodity_label,
+        rake_type_label=rake_type_label,
+        graph_html=graph_html,
+        outliers=outliers_df.to_dict('records') if not outliers_df.empty else [],
+        outlier_count=len(outliers_df)
     )
 
 @app.route("/export", methods=["POST"])
@@ -458,28 +699,35 @@ def export_csv():
         # Generate analysis based on type
         if analysis_type == "last30days":
             df["date"] = df["received_time"].dt.date
-            result = df.groupby("date", as_index=False)["transit_time_hrs"].mean()
+            result = df.groupby("date", as_index=False).agg({
+                'transit_time_hrs': 'mean',
+                'sttn_from': 'count'
+            })
+            result.columns = ['date', 'avg_transit_time_hrs', 'rake_count']
         elif analysis_type == "weekly":
             result = (
                 df.set_index("received_time")
-                  .resample("W")["transit_time_hrs"]
-                  .mean()
+                  .resample("W")
+                  .agg({'transit_time_hrs': 'mean', 'sttn_from': 'count'})
                   .reset_index()
             )
+            result.columns = ['week', 'avg_transit_time_hrs', 'rake_count']
         elif analysis_type == "fortnightly":
             result = (
                 df.set_index("received_time")
-                  .resample("2W")["transit_time_hrs"]
-                  .mean()
+                  .resample("2W")
+                  .agg({'transit_time_hrs': 'mean', 'sttn_from': 'count'})
                   .reset_index()
             )
+            result.columns = ['fortnight', 'avg_transit_time_hrs', 'rake_count']
         elif analysis_type == "monthly":
             result = (
                 df.set_index("received_time")
-                  .resample("M")["transit_time_hrs"]
-                  .mean()
+                  .resample("ME")  # Changed from "M" to "ME"
+                  .agg({'transit_time_hrs': 'mean', 'sttn_from': 'count'})
                   .reset_index()
             )
+            result.columns = ['month', 'avg_transit_time_hrs', 'rake_count']
     else:
         result = df
 

@@ -6,10 +6,33 @@
     <h3>Select Unit (Destination Station)</h3>
     <div class="unit-buttons">
         {% for unit in sttn_tos %}
-        <a href="?unit={{ unit }}" class="unit-btn {% if unit == selected_unit %}active{% endif %}">
+        <a href="?unit={{ unit }}" class="unit-btn {% if unit == selected_unit %}active{% endif %}" onclick="resetFilters()">
             {{ unit }}
         </a>
         {% endfor %}
+    </div>
+</div>
+
+<!-- REQUIREMENT 3: Selection Labels Display -->
+<div class="card" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white;">
+    <h3 style="color: white; margin-bottom: 15px;">📊 Current Analysis Selection</h3>
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">
+        <div style="background: rgba(255,255,255,0.15); padding: 12px; border-radius: 8px;">
+            <div style="font-size: 0.85em; opacity: 0.9; margin-bottom: 5px;">DESTINATION</div>
+            <div style="font-size: 1.2em; font-weight: bold;">{{ selected_unit or 'Not Selected' }}</div>
+        </div>
+        <div style="background: rgba(255,255,255,0.15); padding: 12px; border-radius: 8px;">
+            <div style="font-size: 0.85em; opacity: 0.9; margin-bottom: 5px;">SOURCE STATION</div>
+            <div style="font-size: 1.2em; font-weight: bold;">{{ source_label }}</div>
+        </div>
+        <div style="background: rgba(255,255,255,0.15); padding: 12px; border-radius: 8px;">
+            <div style="font-size: 0.85em; opacity: 0.9; margin-bottom: 5px;">COMMODITY</div>
+            <div style="font-size: 1.2em; font-weight: bold;">{{ commodity_label }}</div>
+        </div>
+        <div style="background: rgba(255,255,255,0.15); padding: 12px; border-radius: 8px;">
+            <div style="font-size: 0.85em; opacity: 0.9; margin-bottom: 5px;">RAKE TYPE</div>
+            <div style="font-size: 1.2em; font-weight: bold;">{{ rake_type_label }}</div>
+        </div>
     </div>
 </div>
 
@@ -17,13 +40,13 @@
 <div class="card">
     <h3>Filters & Analysis for {{ selected_unit }}</h3>
 
-    <form method="POST" action="/dashboard">
-        <input type="hidden" name="unit" value="{{ selected_unit }}">
+    <form method="POST" action="/dashboard" id="analysisForm">
+        <input type="hidden" name="unit" value="{{ selected_unit }}" id="unitInput">
 
         <div class="filter-grid">
             <div>
                 <label>Source Station</label>
-                <select name="sttn_from">
+                <select name="sttn_from" id="sourceSelect">
                     <option value="">All Sources</option>
                     {% for s in sttn_froms %}
                     <option value="{{ s }}" {% if s == selected_sttn_from %}selected{% endif %}>{{ s }}</option>
@@ -33,7 +56,7 @@
 
             <div>
                 <label>Commodity</label>
-                <select name="commodity">
+                <select name="commodity" id="commoditySelect">
                     <option value="">All Commodities</option>
                     {% for c in commodities %}
                     <option value="{{ c }}" {% if c == selected_commodity %}selected{% endif %}>{{ c }}</option>
@@ -43,7 +66,7 @@
 
             <div>
                 <label>Rake Type</label>
-                <select name="rake_type">
+                <select name="rake_type" id="rakeTypeSelect">
                     <option value="">All Rake Types</option>
                     {% for r in rake_types %}
                     <option value="{{ r }}" {% if r == selected_rake_type %}selected{% endif %}>{{ r }}</option>
@@ -76,5 +99,194 @@
     {{ graph_html | safe }}
 </div>
 {% endif %}
+
+<!-- Outliers Table -->
+{% if outliers and outlier_count > 0 %}
+<div class="card" style="margin-top: 20px;">
+    <h3 style="color: #d32f2f; display: flex; align-items: center; gap: 10px;">
+        <span style="font-size: 1.5em;">⚠️</span>
+        Outlier Transit Times Detected 
+        <span style="background: #d32f2f; color: white; padding: 4px 12px; border-radius: 12px; font-size: 0.9em;">{{ outlier_count }}</span>
+    </h3>
+    <p style="color: #666; margin: 10px 0 20px 0;">
+        Records with transit times significantly higher or lower than the average (using IQR method: Q1 - 1.5×IQR and Q3 + 1.5×IQR)
+    </p>
+    
+    <div style="overflow-x: auto;">
+        <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
+            <thead>
+                <tr style="background: #f5f5f5; border-bottom: 2px solid #ddd;">
+                    <th style="padding: 12px; text-align: left; font-weight: bold; color: #333;">#</th>
+                    <th style="padding: 12px; text-align: left; font-weight: bold; color: #333;">Received Time</th>
+                    <th style="padding: 12px; text-align: left; font-weight: bold; color: #333;">Source Station</th>
+                    <th style="padding: 12px; text-align: left; font-weight: bold; color: #333;">Destination</th>
+                    <th style="padding: 12px; text-align: left; font-weight: bold; color: #333;">Commodity</th>
+                    <th style="padding: 12px; text-align: left; font-weight: bold; color: #333;">Rake Type</th>
+                    <th style="padding: 12px; text-align: right; font-weight: bold; color: #d32f2f;">Transit Time (Hrs)</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for idx, outlier in enumerate(outliers, 1) %}
+                <tr style="border-bottom: 1px solid #eee; {% if loop.index % 2 == 0 %}background: #fafafa;{% endif %}">
+                    <td style="padding: 10px;">{{ idx }}</td>
+                    <td style="padding: 10px;">{{ outlier.received_time }}</td>
+                    <td style="padding: 10px; font-weight: 600; color: #1f3a5f;">{{ outlier.sttn_from }}</td>
+                    <td style="padding: 10px; font-weight: 600; color: #1f3a5f;">{{ outlier.sttn_to }}</td>
+                    <td style="padding: 10px;">{{ outlier.cmdt }}</td>
+                    <td style="padding: 10px;">{{ outlier.rake_type }}</td>
+                    <td style="padding: 10px; text-align: right; font-weight: bold; color: #d32f2f; font-size: 1.1em;">
+                        {{ outlier.transit_time_hrs }}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    
+    <div style="margin-top: 15px; padding: 12px; background: #fff3cd; border-left: 4px solid #ffc107; border-radius: 4px;">
+        <strong>📊 Statistics:</strong>
+        <ul style="margin: 8px 0 0 20px; color: #666;">
+            <li>Total records analyzed: {{ outliers|length + outlier_count }}</li>
+            <li>Outliers detected: {{ outlier_count }} ({{ "%.1f"|format((outlier_count * 100.0) / (outliers|length + outlier_count) if (outliers|length + outlier_count) > 0 else 0) }}%)</li>
+            <li>These records may require investigation for delays or data quality issues</li>
+        </ul>
+    </div>
+</div>
+{% endif %}
+
+<!-- REQUIREMENT 2: Dynamic Filter JavaScript -->
+<script>
+// Store current selections
+let currentDestination = "{{ selected_unit }}";
+let currentSource = "{{ selected_sttn_from }}";
+let currentCommodity = "{{ selected_commodity }}";
+let currentRakeType = "{{ selected_rake_type }}";
+
+// Function to update filter options dynamically
+async function updateFilters(changedFilter) {
+    // Get current values
+    const destination = document.getElementById('unitInput').value;
+    const source = document.getElementById('sourceSelect').value;
+    const commodity = document.getElementById('commoditySelect').value;
+    const rakeType = document.getElementById('rakeTypeSelect').value;
+    
+    try {
+        // Call API to get filtered options
+        const response = await fetch('/api/get_filters', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                destination: destination,
+                source: source,
+                commodity: commodity,
+                rake_type: rakeType
+            })
+        });
+        
+        const data = await response.json();
+        
+        // Update source dropdown (except if source was changed)
+        if (changedFilter !== 'source') {
+            updateSelectOptions('sourceSelect', data.sources, source, 'All Sources');
+        }
+        
+        // Update commodity dropdown (except if commodity was changed)
+        if (changedFilter !== 'commodity') {
+            updateSelectOptions('commoditySelect', data.commodities, commodity, 'All Commodities');
+        }
+        
+        // Update rake type dropdown (except if rake type was changed)
+        if (changedFilter !== 'rakeType') {
+            updateSelectOptions('rakeTypeSelect', data.rake_types, rakeType, 'All Rake Types');
+        }
+    } catch (error) {
+        console.error('Error updating filters:', error);
+    }
+}
+
+// Helper function to update select options
+function updateSelectOptions(selectId, options, currentValue, defaultLabel) {
+    const select = document.getElementById(selectId);
+    const selectedValue = currentValue || select.value;
+    
+    // Clear current options
+    select.innerHTML = '';
+    
+    // Add default "All" option
+    const defaultOption = document.createElement('option');
+    defaultOption.value = '';
+    defaultOption.textContent = defaultLabel;
+    select.appendChild(defaultOption);
+    
+    // Add filtered options
+    options.forEach(option => {
+        const optElement = document.createElement('option');
+        optElement.value = option;
+        optElement.textContent = option;
+        if (option === selectedValue) {
+            optElement.selected = true;
+        }
+        select.appendChild(optElement);
+    });
+    
+    // If previously selected value is not in new options, reset to "All"
+    if (selectedValue && !options.includes(selectedValue)) {
+        select.value = '';
+    }
+}
+
+// Add event listeners to all filter dropdowns
+document.getElementById('sourceSelect').addEventListener('change', function() {
+    updateFilters('source');
+});
+
+document.getElementById('commoditySelect').addEventListener('change', function() {
+    updateFilters('commodity');
+});
+
+document.getElementById('rakeTypeSelect').addEventListener('change', function() {
+    updateFilters('rakeType');
+});
+
+// Function to reset filters when changing destination
+function resetFilters() {
+    // This will be called when unit button is clicked
+    // The page will reload with new unit parameter
+}
+
+// Initialize filters on page load
+document.addEventListener('DOMContentLoaded', function() {
+    // If a unit is selected, update filters
+    if (currentDestination) {
+        updateFilters('initial');
+    }
+});
+</script>
+
+<style>
+/* Add loading state for selects */
+select:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+/* Highlight active filters */
+select:not([value=""]) {
+    border-color: #667eea;
+    background-color: #f8f9ff;
+}
+
+/* Enhanced hover effects */
+.unit-btn {
+    transition: all 0.3s ease;
+}
+
+.unit-btn:not(.active):hover {
+    transform: translateY(-3px);
+    box-shadow: 0 6px 12px rgba(0,0,0,0.15);
+}
+</style>
 
 {% endblock %}
