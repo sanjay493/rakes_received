@@ -126,9 +126,9 @@
                 </tr>
             </thead>
             <tbody>
-                {% for idx, outlier in enumerate(outliers, 1) %}
+                {% for outlier in outliers %}
                 <tr style="border-bottom: 1px solid #eee; {% if loop.index % 2 == 0 %}background: #fafafa;{% endif %}">
-                    <td style="padding: 10px;">{{ idx }}</td>
+                    <td style="padding: 10px;">{{ loop.idx }}</td>
                     <td style="padding: 10px;">{{ outlier.received_time }}</td>
                     <td style="padding: 10px; font-weight: 600; color: #1f3a5f;">{{ outlier.sttn_from }}</td>
                     <td style="padding: 10px; font-weight: 600; color: #1f3a5f;">{{ outlier.sttn_to }}</td>
