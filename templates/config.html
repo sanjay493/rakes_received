@@ -1,0 +1,302 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="card" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white;">
+    <h2 style="color: white; margin-bottom: 10px;">⚙️ Configuration Management</h2>
+    <p style="color: rgba(255,255,255,0.9); margin: 0;">Manage station and commodity code mappings</p>
+</div>
+
+<!-- Station Mappings Section -->
+<div class="card" style="margin-top: 20px;">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+        <h3 style="color: #1f3a5f; margin: 0;">🏭 Station Mappings</h3>
+        <button onclick="showAddModal('station')" style="background: #1976d2; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; font-weight: bold;">
+            + Add Station Mapping
+        </button>
+    </div>
+    
+    <div style="overflow-x: auto;">
+        <table style="width: 100%; border-collapse: collapse;">
+            <thead>
+                <tr style="background: linear-gradient(to bottom, #f8f9fa 0%, #e9ecef 100%); border-bottom: 2px solid #dee2e6;">
+                    <th style="padding: 12px; text-align: left; font-weight: bold; color: #1f3a5f; width: 25%;">Code</th>
+                    <th style="padding: 12px; text-align: left; font-weight: bold; color: #1f3a5f; width: 55%;">Full Name</th>
+                    <th style="padding: 12px; text-align: center; font-weight: bold; color: #1f3a5f; width: 20%;">Actions</th>
+                </tr>
+            </thead>
+            <tbody id="stationTableBody">
+                {% for code, name in station_mappings.items() %}
+                <tr style="border-bottom: 1px solid #e9ecef;">
+                    <td style="padding: 12px; font-weight: 600; color: #1976d2;">{{ code }}</td>
+                    <td style="padding: 12px; color: #333;">{{ name }}</td>
+                    <td style="padding: 12px; text-align: center;">
+                        <button onclick="editMapping('station', '{{ code }}', '{{ name }}')" 
+                                style="background: #ffa726; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; margin-right: 5px;">
+                            Edit
+                        </button>
+                        <button onclick="deleteMapping('station', '{{ code }}')" 
+                                style="background: #e53935; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer;">
+                            Delete
+                        </button>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    
+    <div style="margin-top: 15px; padding: 12px; background: #e3f2fd; border-left: 4px solid #1976d2; border-radius: 4px; font-size: 13px;">
+        <strong style="color: #0d47a1;">💡 Note:</strong> Changes will be applied to newly uploaded data. Existing data in the database will retain their original mappings.
+    </div>
+</div>
+
+<!-- Commodity Mappings Section -->
+<div class="card" style="margin-top: 20px;">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+        <h3 style="color: #1f3a5f; margin: 0;">📦 Commodity Mappings</h3>
+        <button onclick="showAddModal('commodity')" style="background: #388e3c; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; font-weight: bold;">
+            + Add Commodity Mapping
+        </button>
+    </div>
+    
+    <div style="overflow-x: auto;">
+        <table style="width: 100%; border-collapse: collapse;">
+            <thead>
+                <tr style="background: linear-gradient(to bottom, #f8f9fa 0%, #e9ecef 100%); border-bottom: 2px solid #dee2e6;">
+                    <th style="padding: 12px; text-align: left; font-weight: bold; color: #1f3a5f; width: 25%;">Code</th>
+                    <th style="padding: 12px; text-align: left; font-weight: bold; color: #1f3a5f; width: 55%;">Commodity Name</th>
+                    <th style="padding: 12px; text-align: center; font-weight: bold; color: #1f3a5f; width: 20%;">Actions</th>
+                </tr>
+            </thead>
+            <tbody id="commodityTableBody">
+                {% for code, name in commodity_mappings.items() %}
+                <tr style="border-bottom: 1px solid #e9ecef;">
+                    <td style="padding: 12px; font-weight: 600; color: #388e3c;">{{ code }}</td>
+                    <td style="padding: 12px; color: #333;">{{ name }}</td>
+                    <td style="padding: 12px; text-align: center;">
+                        <button onclick="editMapping('commodity', '{{ code }}', '{{ name }}')" 
+                                style="background: #ffa726; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; margin-right: 5px;">
+                            Edit
+                        </button>
+                        <button onclick="deleteMapping('commodity', '{{ code }}')" 
+                                style="background: #e53935; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer;">
+                            Delete
+                        </button>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    
+    <div style="margin-top: 15px; padding: 12px; background: #e8f5e9; border-left: 4px solid #388e3c; border-radius: 4px; font-size: 13px;">
+        <strong style="color: #1b5e20;">💡 Note:</strong> Changes will be applied to newly uploaded data. Existing data in the database will retain their original mappings.
+    </div>
+</div>
+
+<!-- Configuration Files Info -->
+<div class="card" style="margin-top: 20px; background: #fff3e0; border: 2px solid #ffa726;">
+    <h3 style="color: #e65100; margin-bottom: 15px;">📄 Configuration Files</h3>
+    <p style="color: #666; margin-bottom: 15px;">
+        The mappings are stored in text files that can be edited directly or through this interface:
+    </p>
+    <ul style="color: #666; margin-left: 20px; line-height: 1.8;">
+        <li><strong>station_mappings.txt</strong> - Contains all station code to name mappings</li>
+        <li><strong>commodity_mappings.txt</strong> - Contains all commodity code to name mappings</li>
+    </ul>
+    <p style="color: #666; margin-top: 15px;">
+        <strong>Manual Editing:</strong> You can edit these files directly using any text editor. 
+        Format: <code style="background: #fff; padding: 2px 6px; border-radius: 3px;">CODE = Full Name</code>
+    </p>
+    <button onclick="reloadConfig()" 
+            style="background: #ff6f00; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; font-weight: bold; margin-top: 10px;">
+        🔄 Reload Configuration Files
+    </button>
+</div>
+
+<!-- Add/Edit Modal -->
+<div id="mappingModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000; justify-content: center; align-items: center;">
+    <div style="background: white; padding: 30px; border-radius: 12px; width: 90%; max-width: 500px; box-shadow: 0 4px 20px rgba(0,0,0,0.3);">
+        <h3 id="modalTitle" style="color: #1f3a5f; margin-bottom: 20px;">Add Mapping</h3>
+        
+        <form id="mappingForm" onsubmit="submitMapping(event)">
+            <input type="hidden" id="modalType" value="">
+            <input type="hidden" id="modalAction" value="add">
+            <input type="hidden" id="originalCode" value="">
+            
+            <div style="margin-bottom: 20px;">
+                <label style="display: block; margin-bottom: 8px; font-weight: bold; color: #555;">Code:</label>
+                <input type="text" id="codeInput" required 
+                       style="width: 100%; padding: 10px; border: 2px solid #ddd; border-radius: 6px; font-size: 14px;"
+                       placeholder="e.g., BYFS">
+            </div>
+            
+            <div style="margin-bottom: 20px;">
+                <label style="display: block; margin-bottom: 8px; font-weight: bold; color: #555;">Full Name:</label>
+                <input type="text" id="nameInput" required 
+                       style="width: 100%; padding: 10px; border: 2px solid #ddd; border-radius: 6px; font-size: 14px;"
+                       placeholder="e.g., Bolani">
+            </div>
+            
+            <div style="display: flex; gap: 10px; justify-content: flex-end;">
+                <button type="button" onclick="closeModal()" 
+                        style="background: #757575; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; font-weight: bold;">
+                    Cancel
+                </button>
+                <button type="submit" 
+                        style="background: #1976d2; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; font-weight: bold;">
+                    Save
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Message Toast -->
+<div id="messageToast" style="display: none; position: fixed; top: 20px; right: 20px; background: #4caf50; color: white; padding: 15px 25px; border-radius: 6px; z-index: 2000; box-shadow: 0 4px 12px rgba(0,0,0,0.3); font-weight: bold;">
+    Message
+</div>
+
+<script>
+function showAddModal(type) {
+    document.getElementById('modalType').value = type;
+    document.getElementById('modalAction').value = 'add';
+    document.getElementById('modalTitle').textContent = 'Add ' + (type === 'station' ? 'Station' : 'Commodity') + ' Mapping';
+    document.getElementById('codeInput').value = '';
+    document.getElementById('nameInput').value = '';
+    document.getElementById('codeInput').disabled = false;
+    document.getElementById('mappingModal').style.display = 'flex';
+}
+
+function editMapping(type, code, name) {
+    document.getElementById('modalType').value = type;
+    document.getElementById('modalAction').value = 'edit';
+    document.getElementById('originalCode').value = code;
+    document.getElementById('modalTitle').textContent = 'Edit ' + (type === 'station' ? 'Station' : 'Commodity') + ' Mapping';
+    document.getElementById('codeInput').value = code;
+    document.getElementById('nameInput').value = name;
+    document.getElementById('codeInput').disabled = true;
+    document.getElementById('mappingModal').style.display = 'flex';
+}
+
+function closeModal() {
+    document.getElementById('mappingModal').style.display = 'none';
+}
+
+function showMessage(message, isSuccess = true) {
+    const toast = document.getElementById('messageToast');
+    toast.textContent = message;
+    toast.style.background = isSuccess ? '#4caf50' : '#f44336';
+    toast.style.display = 'block';
+    setTimeout(() => {
+        toast.style.display = 'none';
+    }, 3000);
+}
+
+async function submitMapping(event) {
+    event.preventDefault();
+    
+    const type = document.getElementById('modalType').value;
+    const action = document.getElementById('modalAction').value;
+    const code = document.getElementById('codeInput').value.trim().toUpperCase();
+    const name = document.getElementById('nameInput').value.trim();
+    
+    const formData = new FormData();
+    formData.append('action', action);
+    formData.append('code', code);
+    formData.append('name', name);
+    
+    try {
+        const response = await fetch(`/config/${type}`, {
+            method: 'POST',
+            body: formData
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            showMessage(result.message, true);
+            closeModal();
+            // Reload page to show updated mappings
+            setTimeout(() => {
+                window.location.reload();
+            }, 1000);
+        } else {
+            showMessage(result.message, false);
+        }
+    } catch (error) {
+        showMessage('Error: ' + error.message, false);
+    }
+}
+
+async function deleteMapping(type, code) {
+    if (!confirm(`Are you sure you want to delete the mapping for "${code}"?`)) {
+        return;
+    }
+    
+    const formData = new FormData();
+    formData.append('action', 'delete');
+    formData.append('code', code);
+    
+    try {
+        const response = await fetch(`/config/${type}`, {
+            method: 'POST',
+            body: formData
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            showMessage(result.message, true);
+            // Reload page to show updated mappings
+            setTimeout(() => {
+                window.location.reload();
+            }, 1000);
+        } else {
+            showMessage(result.message, false);
+        }
+    } catch (error) {
+        showMessage('Error: ' + error.message, false);
+    }
+}
+
+async function reloadConfig() {
+    try {
+        const response = await fetch('/config/reload', {
+            method: 'POST'
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            showMessage(`${result.message} (${result.station_count} stations, ${result.commodity_count} commodities)`, true);
+            setTimeout(() => {
+                window.location.reload();
+            }, 1500);
+        } else {
+            showMessage('Failed to reload configuration', false);
+        }
+    } catch (error) {
+        showMessage('Error: ' + error.message, false);
+    }
+}
+</script>
+
+<style>
+    table tr:hover {
+        background: #f5f5f5;
+    }
+    
+    button:hover {
+        opacity: 0.9;
+        transform: translateY(-1px);
+        transition: all 0.2s;
+    }
+    
+    input:focus {
+        outline: none;
+        border-color: #1976d2;
+    }
+</style>
+
+{% endblock %}

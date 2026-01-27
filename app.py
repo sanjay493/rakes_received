@@ -48,6 +48,63 @@ engine = create_engine("sqlite:///rake_data.db")
 Base.metadata.create_all(engine)
 SessionDB = sessionmaker(bind=engine)
 
+# ------------------ CONFIGURATION LOADING ------------------
+
+def load_mappings(filepath):
+    """
+    Load mappings from a configuration file.
+    Format: KEY = VALUE
+    Lines starting with # are comments and will be ignored.
+    """
+    mappings = {}
+    try:
+        with open(filepath, 'r') as f:
+            for line in f:
+                line = line.strip()
+                # Skip empty lines and comments
+                if not line or line.startswith('#'):
+                    continue
+                # Parse KEY = VALUE format
+                if '=' in line:
+                    key, value = line.split('=', 1)
+                    key = key.strip()
+                    value = value.strip()
+                    if key and value:
+                        mappings[key] = value
+    except FileNotFoundError:
+        print(f"Warning: Configuration file {filepath} not found. Using empty mappings.")
+    except Exception as e:
+        print(f"Error loading {filepath}: {str(e)}")
+    
+    return mappings
+
+def save_mappings(filepath, mappings):
+    """
+    Save mappings to a configuration file.
+    """
+    try:
+        with open(filepath, 'w') as f:
+            # Write header
+            f.write("# Configuration File\n")
+            f.write("# Format: CODE = Full Name\n")
+            f.write("# Lines starting with # are comments\n")
+            f.write("# You can add, remove, or modify mappings as needed\n\n")
+            
+            # Write mappings
+            for key, value in sorted(mappings.items()):
+                f.write(f"{key} = {value}\n")
+        return True
+    except Exception as e:
+        print(f"Error saving {filepath}: {str(e)}")
+        return False
+
+# Load configuration files
+STATION_MAPPINGS_FILE = "station_mappings.txt"
+COMMODITY_MAPPINGS_FILE = "commodity_mappings.txt"
+
+station_mappings = load_mappings(STATION_MAPPINGS_FILE)
+commodity_mappings = load_mappings(COMMODITY_MAPPINGS_FILE)
+
 # ------------------ CLEANING ------------------
 
 def clean_data(df):
@@ -86,56 +143,13 @@ def clean_data(df):
     # Units cleanup
     df["totl_unts"] = df["totl_unts"].astype(str).str.split(r"\+").str[0]
     df["totl_unts"] = pd.to_numeric(df["totl_unts"], errors="coerce")
-     # Sinding normalization
-    df["sttn_from"] = df["sttn_from"].replace({
-        "BYFS":"Bolani",
-        "HLSR":"Kalta",
-        "PBSB":"Barsua-Taldih",
-        "FOS":"Kiriburu Fines",
-        "SOBK":"Kiriburu Lumps",
-        "SSMK":"Meghahatuburu",
-        "ISCG":"Gua",
-        "IISM":"Manoharpur",
-        "SONU":"SONU Jodhpur",
-        "CBSP":"Cargo Berth Siding Paradeep Port",
-        "DPCB":"DHAMRA PORT",
-        "HDCB":"HALDIA DOCKS",
-        "DDSP":"Deep Draught Berths Paradeep Port",
-        "VSPV":"VIZAG SEAPORT",
-        "VGSD":"VIZAG GENERAL CARGO BERTH",
-        "MGPV":"ADANI GANGAVARAM PORT",
-        "VZP":"VISHAKHAPATNAM-PORT",
+    # Station normalization from configuration file
+    if station_mappings:
+        df["sttn_from"] = df["sttn_from"].replace(station_mappings)
 
-
-
-    })
-
-    # Commodity normalization
-    df["cmdt"] = df["cmdt"].replace(
-        {"IOST": "IRON ORE",
-          "IORE": "IRON ORE", 
-          "DLMT":"DOLOMITE ORES",
-          "DLST":"DOLOMITE ORES",
-          "FOIL":"FURNACE OIL",
-          "IMCL":"IMPORTED COAL",
-          "IS":"IRON & STEEL",
-          "LSST":"LIME STONE ORES",
-          "LST":"LIME STONE ORES",
-          "METL":"SILICO MANGANESE",
-          "NCOL":"NON PROGRAMMED COAL",
-          "NMCL":"NON PROGRAMMED COAL",
-          "NPBC":"NON PROGRAMMED COAL",
-          "NPHC":"NON PROGRAMMED COAL",
-          "NSTC":"NON PROGRAMMED COAL",
-          "STC":"COAL",
-          "PBC":"COAL",
-          "PHC":"COAL",
-          "PIOR":"PELLET",
-          "PIST":"PELLET",
-          "SINT":"SINTER",
-          
-          
-          })
+    # Commodity normalization from configuration file
+    if commodity_mappings:
+        df["cmdt"] = df["cmdt"].replace(commodity_mappings)
 
     # ------------------ PATCHED sttn_to LOGIC ------------------
 
@@ -798,15 +812,16 @@ def commodity_analysis():
     if not df.empty:
         df["received_time"] = pd.to_datetime(df["received_time"])
         
-        # Calculate date ranges based on actual data, not current date
+        # Calculate date ranges based on yesterday, not actual data
         max_date = df['received_time'].max()
         min_date = df['received_time'].min()
         print("Last Record Date", max_date)
-        # Use actual data range for calculations
-        yesterday_timestamp = pd.Timestamp("today") - pd.Timedelta(days=1)
-        last_4_months = max_date - timedelta(days=120)
-        last_8_weeks = yesterday_timestamp - timedelta(days=28)
-        last_4_days = max_date - timedelta(days=4)
+        # Use yesterday as anchor for all calculations
+        yesterday = pd.Timestamp("today").normalize() - pd.Timedelta(days=1)
+        last_4_months = yesterday - timedelta(days=120)
+        last_8_weeks = yesterday - timedelta(days=28)
+        last_4_days = yesterday - timedelta(days=4)
+        print("Yesterday (anchor):", yesterday)
         print("Last_8_weeks:", last_8_weeks)
         # Generate header labels for months (last 4 months from actual data)
         temp_df = df[df['received_time'] >= last_4_months]
@@ -827,53 +842,28 @@ def commodity_analysis():
         while len(header_months) < 4:
             header_months.insert(0, "—")
         
-        # Generate header labels for weeks (last 4 weeks from actual data)
-        anchor_date = (max_date.floor('D') - pd.Timedelta(days=1)).normalize()
-        
-        temp_df = df[df['received_time'] >= last_8_weeks]
-        if len(temp_df) > 0:
-            week_headers = (
-                temp_df.set_index('received_time')
-                .resample('W')
-                .size()
-                .reset_index()
-            )
-          
-            print(week_headers)
-            # week_headers = week_headers.tail(4)
-            for _, row in week_headers.iterrows():
-                week_start = row['received_time']
-                week_end = min(week_start + timedelta(days=6), max_date)  # Don't go beyond max_date
-
-                print(f"Week Start: {week_start}, Week End: {week_end}")
-                # If week end is in same month as start
-                if week_start.month == week_end.month:
-                    header_weeks.append(f"{week_start.strftime('%d')}-{week_end.strftime('%d %b')}")
-                else:
-                    # Week spans two months
-                    header_weeks.append(f"{week_start.strftime('%d %b')}-{week_end.strftime('%d %b')}")
-        
-        # Pad if less than 4
-        while len(header_weeks) < 4:
-            header_weeks.insert(0, "—")
-        
-        # Generate header labels for days (last 4 days from actual data)
-        temp_df = df[df['received_time'] >= last_4_days]
-        if len(temp_df) > 0:
-            day_headers = (
-                temp_df.set_index('received_time')
-                .resample('D')
-                .size()
-                .reset_index()
-            )
+        # Generate header labels for weeks (simple 7-day intervals from yesterday)
+        # Create 4 weeks: (yesterday-27 to yesterday-21), (yesterday-20 to yesterday-14), 
+        #                 (yesterday-13 to yesterday-7), (yesterday-6 to yesterday)
+        header_weeks = []
+        for i in range(3, -1, -1):  # 3, 2, 1, 0
+            week_end = yesterday - timedelta(days=i*7)
+            week_start = week_end - timedelta(days=6)
             
-            day_headers = day_headers.tail(4)
-            for _, row in day_headers.iterrows():
-                header_days.append(row['received_time'].strftime('%d-%b'))
+            print(f"Week {4-i}: Start: {week_start}, End: {week_end}")
+            
+            # If week spans two months
+            if week_start.month == week_end.month:
+                header_weeks.append(f"{week_start.strftime('%d')}-{week_end.strftime('%d %b')}")
+            else:
+                # Week spans two months
+                header_weeks.append(f"{week_start.strftime('%d %b')}-{week_end.strftime('%d %b')}")
         
-        # Pad if less than 4
-        while len(header_days) < 4:
-            header_days.insert(0, "—")
+        # Generate header labels for days (last 4 days: yesterday-3, yesterday-2, yesterday-1, yesterday)
+        header_days = []
+        for i in range(3, -1, -1):  # 3, 2, 1, 0
+            day = yesterday - timedelta(days=i)
+            header_days.append(day.strftime('%d-%b'))
         
         # Group by commodity, destination, and source
         grouped = df.groupby(['cmdt', 'sttn_to', 'sttn_from'])
@@ -900,45 +890,55 @@ def commodity_analysis():
                             'count': int(row['sttn_from'])
                         })
             
-            # Last 8 weeks - week by week breakdown (showing last 4 weeks)
+            # Last 4 weeks - week by week breakdown using simple 7-day intervals
             df_8w = group_df[group_df['received_time'] >= last_8_weeks]
             weeks_data = []
             if len(df_8w) > 0:
-                weekly_breakdown = (
-                    df_8w.set_index('received_time')
-                    .resample('W')
-                    .agg({'transit_time_hrs': 'mean', 'sttn_from': 'count'})
-                    .reset_index()
-                )
-                # Get last 4 weeks
-                weekly_breakdown = weekly_breakdown.tail(4)
-                for _, row in weekly_breakdown.iterrows():
-                    if row['sttn_from'] > 0:  # Only add if data exists
-                        week_start = row['received_time']
+                # Create 4 weeks manually: week 1, week 2, week 3, week 4
+                for i in range(3, -1, -1):  # 3, 2, 1, 0
+                    week_end = yesterday - timedelta(days=i*7)
+                    week_start = week_end - timedelta(days=6)
+                    
+                    # Filter data for this specific week
+                    week_df = group_df[
+                        (group_df['received_time'] >= week_start) & 
+                        (group_df['received_time'] <= week_end + timedelta(hours=23, minutes=59, seconds=59))
+                    ]
+                    
+                    if len(week_df) > 0:
+                        avg_transit = week_df['transit_time_hrs'].mean()
+                        count = len(week_df)
+                        
                         weeks_data.append({
                             'label': week_start.strftime('%d-%m'),
-                            'avg': round(row['transit_time_hrs'], 2) if pd.notna(row['transit_time_hrs']) else None,
-                            'count': int(row['sttn_from'])
+                            'avg': round(avg_transit, 2) if pd.notna(avg_transit) else None,
+                            'count': int(count)
                         })
             
-            # Last 4 days - day by day breakdown
+            # Last 4 days - day by day breakdown using simple day intervals
             df_4d = group_df[group_df['received_time'] >= last_4_days]
             days_data = []
             if len(df_4d) > 0:
-                daily_breakdown = (
-                    df_4d.set_index('received_time')
-                    .resample('D')
-                    .agg({'transit_time_hrs': 'mean', 'sttn_from': 'count'})
-                    .reset_index()
-                )
-                # Get last 4 days
-                daily_breakdown = daily_breakdown.tail(4)
-                for _, row in daily_breakdown.iterrows():
-                    if row['sttn_from'] > 0:  # Only add if data exists
+                # Create 4 days manually: yesterday-3, yesterday-2, yesterday-1, yesterday
+                for i in range(3, -1, -1):  # 3, 2, 1, 0
+                    day = yesterday - timedelta(days=i)
+                    day_start = day
+                    day_end = day + timedelta(hours=23, minutes=59, seconds=59)
+                    
+                    # Filter data for this specific day
+                    day_df = group_df[
+                        (group_df['received_time'] >= day_start) & 
+                        (group_df['received_time'] <= day_end)
+                    ]
+                    
+                    if len(day_df) > 0:
+                        avg_transit = day_df['transit_time_hrs'].mean()
+                        count = len(day_df)
+                        
                         days_data.append({
-                            'label': row['received_time'].strftime('%d-%b'),
-                            'avg': round(row['transit_time_hrs'], 2) if pd.notna(row['transit_time_hrs']) else None,
-                            'count': int(row['sttn_from'])
+                            'label': day.strftime('%d-%b'),
+                            'avg': round(avg_transit, 2) if pd.notna(avg_transit) else None,
+                            'count': int(count)
                         })
             
             # Calculate overall averages for compatibility
@@ -949,8 +949,8 @@ def commodity_analysis():
             avg_4d = df_4d['transit_time_hrs'].mean() if len(df_4d) > 0 else None
             count_4d = len(df_4d)
             
-            # Calculate best monthly average (last 12 months from max_date)
-            last_12_months = max_date - timedelta(days=365)
+            # Calculate best monthly average (last 12 months from yesterday)
+            last_12_months = yesterday - timedelta(days=365)
             df_12m = group_df[group_df['received_time'] >= last_12_months]
             
             if len(df_12m) > 0:
@@ -967,8 +967,8 @@ def commodity_analysis():
                 best_monthly_avg = None
                 best_monthly_count = 0
             
-            # Calculate best fortnightly average (last 6 months from max_date)
-            last_6_months = max_date - timedelta(days=180)
+            # Calculate best fortnightly average (last 6 months from yesterday)
+            last_6_months = yesterday - timedelta(days=180)
             df_6m = group_df[group_df['received_time'] >= last_6_months]
             
             if len(df_6m) > 0:
@@ -985,20 +985,38 @@ def commodity_analysis():
                 best_fortnightly_avg = None
                 best_fortnightly_count = 0
             
-            # Calculate best weekly average (last 3 months from max_date)
-            last_3_months = max_date - timedelta(days=90)
+            # Calculate best weekly average (last 3 months from yesterday) using simple 7-day intervals
+            last_3_months = yesterday - timedelta(days=90)
             df_3m = group_df[group_df['received_time'] >= last_3_months]
             
             if len(df_3m) > 0:
-                weekly_avg = (
-                    df_3m.set_index('received_time')
-                    .resample('W')
-                    .agg({'transit_time_hrs': 'mean', 'sttn_from': 'count'})
-                    .reset_index()
-                )
-                weekly_avg = weekly_avg[weekly_avg['sttn_from'] >= 1]
-                best_weekly_avg = weekly_avg['transit_time_hrs'].min() if len(weekly_avg) > 0 else None
-                best_weekly_count = int(weekly_avg.loc[weekly_avg['transit_time_hrs'] == best_weekly_avg, 'sttn_from'].iloc[0]) if best_weekly_avg else 0
+                # Calculate weekly averages using simple 7-day periods
+                weeks_in_3m = 12  # approximately 12 weeks in 3 months
+                weekly_results = []
+                
+                for week_num in range(weeks_in_3m):
+                    week_end = yesterday - timedelta(days=week_num*7)
+                    week_start = week_end - timedelta(days=6)
+                    
+                    week_data = group_df[
+                        (group_df['received_time'] >= week_start) & 
+                        (group_df['received_time'] <= week_end + timedelta(hours=23, minutes=59, seconds=59))
+                    ]
+                    
+                    if len(week_data) >= 1:
+                        avg = week_data['transit_time_hrs'].mean()
+                        weekly_results.append({
+                            'avg': avg,
+                            'count': len(week_data)
+                        })
+                
+                if weekly_results:
+                    best_week = min(weekly_results, key=lambda x: x['avg'])
+                    best_weekly_avg = best_week['avg']
+                    best_weekly_count = best_week['count']
+                else:
+                    best_weekly_avg = None
+                    best_weekly_count = 0
             else:
                 best_weekly_avg = None
                 best_weekly_count = 0
@@ -1193,6 +1211,96 @@ def export_csv():
         as_attachment=True,
         download_name=f"{analysis_type}_analysis_{selected_unit or 'all'}.csv"
     )
+
+# ------------------ CONFIGURATION MANAGEMENT ------------------
+
+@app.route("/config")
+def config_page():
+    """Display configuration management page"""
+    return render_template("config.html",
+                         station_mappings=station_mappings,
+                         commodity_mappings=commodity_mappings)
+
+@app.route("/config/station", methods=["GET", "POST"])
+def manage_station_config():
+    """Manage station mappings"""
+    if request.method == "POST":
+        action = request.form.get("action")
+        
+        if action == "add":
+            code = request.form.get("code", "").strip().upper()
+            name = request.form.get("name", "").strip()
+            if code and name:
+                station_mappings[code] = name
+                save_mappings(STATION_MAPPINGS_FILE, station_mappings)
+                return jsonify({"success": True, "message": f"Added mapping: {code} → {name}"})
+            return jsonify({"success": False, "message": "Code and name are required"})
+        
+        elif action == "delete":
+            code = request.form.get("code", "").strip().upper()
+            if code in station_mappings:
+                del station_mappings[code]
+                save_mappings(STATION_MAPPINGS_FILE, station_mappings)
+                return jsonify({"success": True, "message": f"Deleted mapping for {code}"})
+            return jsonify({"success": False, "message": f"Code {code} not found"})
+        
+        elif action == "edit":
+            code = request.form.get("code", "").strip().upper()
+            name = request.form.get("name", "").strip()
+            if code and name:
+                station_mappings[code] = name
+                save_mappings(STATION_MAPPINGS_FILE, station_mappings)
+                return jsonify({"success": True, "message": f"Updated mapping: {code} → {name}"})
+            return jsonify({"success": False, "message": "Code and name are required"})
+    
+    return jsonify(station_mappings)
+
+@app.route("/config/commodity", methods=["GET", "POST"])
+def manage_commodity_config():
+    """Manage commodity mappings"""
+    if request.method == "POST":
+        action = request.form.get("action")
+        
+        if action == "add":
+            code = request.form.get("code", "").strip().upper()
+            name = request.form.get("name", "").strip()
+            if code and name:
+                commodity_mappings[code] = name
+                save_mappings(COMMODITY_MAPPINGS_FILE, commodity_mappings)
+                return jsonify({"success": True, "message": f"Added mapping: {code} → {name}"})
+            return jsonify({"success": False, "message": "Code and name are required"})
+        
+        elif action == "delete":
+            code = request.form.get("code", "").strip().upper()
+            if code in commodity_mappings:
+                del commodity_mappings[code]
+                save_mappings(COMMODITY_MAPPINGS_FILE, commodity_mappings)
+                return jsonify({"success": True, "message": f"Deleted mapping for {code}"})
+            return jsonify({"success": False, "message": f"Code {code} not found"})
+        
+        elif action == "edit":
+            code = request.form.get("code", "").strip().upper()
+            name = request.form.get("name", "").strip()
+            if code and name:
+                commodity_mappings[code] = name
+                save_mappings(COMMODITY_MAPPINGS_FILE, commodity_mappings)
+                return jsonify({"success": True, "message": f"Updated mapping: {code} → {name}"})
+            return jsonify({"success": False, "message": "Code and name are required"})
+    
+    return jsonify(commodity_mappings)
+
+@app.route("/config/reload", methods=["POST"])
+def reload_config():
+    """Reload configuration files"""
+    global station_mappings, commodity_mappings
+    station_mappings = load_mappings(STATION_MAPPINGS_FILE)
+    commodity_mappings = load_mappings(COMMODITY_MAPPINGS_FILE)
+    return jsonify({
+        "success": True, 
+        "message": "Configuration files reloaded successfully",
+        "station_count": len(station_mappings),
+        "commodity_count": len(commodity_mappings)
+    })
 
 # ------------------ RUN ------------------
 

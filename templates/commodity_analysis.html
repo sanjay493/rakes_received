@@ -47,69 +47,84 @@
         </div>
 
         <div style="overflow-x: auto;">
-            <table style="width: 100%; border-collapse: collapse; font-size: 13px; min-width: 1600px;">
+            <table style="width: 100%; table-layout: fixed; border-collapse: collapse; font-size: 13px;">
+                <colgroup>
+                    <!-- Source Station: 8% -->
+                    <col style="width: 8%;">
+                    <!-- Last 4 Months: 32% (8% each) -->
+                    <col style="width: 8%;">
+                    <col style="width: 8%;">
+                    <col style="width: 8%;">
+                    <col style="width: 8%;">
+                    <!-- Last 4 Weeks: 32% (8% each) -->
+                    <col style="width: 8%;">
+                    <col style="width: 8%;">
+                    <col style="width: 8%;">
+                    <col style="width: 8%;">
+                    <!-- Last 4 Days: 32% (8% each) -->
+                    <col style="width: 8%;">
+                    <col style="width: 8%;">
+                    <col style="width: 8%;">
+                    <col style="width: 8%;">
+                    <!-- Best Monthly: 6% -->
+                    <col style="width: 6%;">
+                    <!-- Best Fortnightly: 6% -->
+                    <col style="width: 6%;">
+                    <!-- Best Weekly: 6% -->
+                    <col style="width: 6%;">
+                    <!-- Outliers: 6% -->
+                    <col style="width: 6%;">
+                </colgroup>
                 <thead>
                     <tr style="background: linear-gradient(to bottom, #f8f9fa 0%, #e9ecef 100%); border-bottom: 2px solid #dee2e6;">
-                        <th rowspan="2" style="padding: 14px 10px; text-align: left; font-weight: bold; color: #1f3a5f; border-right: 1px solid #dee2e6; position: sticky; left: 0; background: #f8f9fa; z-index: 10; min-width: 150px;">
+                        <th rowspan="2" style="padding: 8px 4px; text-align: left; font-weight: bold; color: #1f3a5f; border-right: 1px solid #dee2e6; position: sticky; left: 0; background: #f8f9fa; z-index: 10; font-size: 11px; word-wrap: break-word; overflow-wrap: break-word;">
                             Source Station
                         </th>
-                        <th colspan="8" style="padding: 14px 10px; text-align: center; font-weight: bold; color: #0277bd; border-right: 1px solid #dee2e6; background: #e3f2fd;">
+                        <th colspan="4" style="padding: 10px 4px; text-align: center; font-weight: bold; color: #0277bd; border-right: 1px solid #dee2e6; background: #e3f2fd; font-size: 12px;">
                             Last 4 Months
                         </th>
-                        <th colspan="8" style="padding: 14px 10px; text-align: center; font-weight: bold; color: #00796b; border-right: 1px solid #dee2e6; background: #e0f2f1;">
+                        <th colspan="4" style="padding: 10px 4px; text-align: center; font-weight: bold; color: #00796b; border-right: 1px solid #dee2e6; background: #e0f2f1; font-size: 12px;">
                             Last 4 Weeks
                         </th>
-                        <th colspan="8" style="padding: 14px 10px; text-align: center; font-weight: bold; color: #f57c00; border-right: 1px solid #dee2e6; background: #fff3e0;">
+                        <th colspan="4" style="padding: 10px 4px; text-align: center; font-weight: bold; color: #f57c00; border-right: 1px solid #dee2e6; background: #fff3e0; font-size: 12px;">
                             Last 4 Days
                         </th>
-                        <th colspan="2" style="padding: 14px 10px; text-align: center; font-weight: bold; color: #7b1fa2; border-right: 1px solid #dee2e6; background: #f3e5f5;">
+                        <th rowspan="2" style="padding: 8px 2px; text-align: center; font-weight: bold; color: #7b1fa2; border-right: 1px solid #dee2e6; background: #f3e5f5; font-size: 10px; word-wrap: break-word; overflow-wrap: break-word; line-height: 1.2;">
                             Best Monthly*
                         </th>
-                        <th colspan="2" style="padding: 14px 10px; text-align: center; font-weight: bold; color: #c62828; border-right: 1px solid #dee2e6; background: #ffebee;">
+                        <th rowspan="2" style="padding: 8px 2px; text-align: center; font-weight: bold; color: #c62828; border-right: 1px solid #dee2e6; background: #ffebee; font-size: 10px; word-wrap: break-word; overflow-wrap: break-word; line-height: 1.2;">
                             Best Fortnightly*
                         </th>
-                        <th colspan="2" style="padding: 14px 10px; text-align: center; font-weight: bold; color: #2e7d32; background: #e8f5e9;">
+                        <th rowspan="2" style="padding: 8px 2px; text-align: center; font-weight: bold; color: #2e7d32; border-right: 1px solid #dee2e6; background: #e8f5e9; font-size: 10px; word-wrap: break-word; overflow-wrap: break-word; line-height: 1.2;">
                             Best Weekly*
                         </th>
-                        <th rowspan="2" style="padding: 14px 10px; text-align: center; font-weight: bold; color: #d84315; border-left: 2px solid #dee2e6; background: #fbe9e7;">
+                        <th rowspan="2" style="padding: 8px 4px; text-align: center; font-weight: bold; color: #d84315; border-left: 2px solid #dee2e6; background: #fbe9e7; font-size: 11px;">
                             Outliers
                         </th>
                     </tr>
                     <tr style="background: linear-gradient(to bottom, #f8f9fa 0%, #e9ecef 100%); border-bottom: 2px solid #495057;">
                         <!-- Last 4 Months - Actual month labels -->
                         {% for month_label in header_months %}
-                        <th colspan="2" style="padding: 8px 5px; text-align: center; font-size: 10px; color: #01579b; background: #e3f2fd; font-weight: bold; {% if loop.index == 4 %}border-right: 1px solid #dee2e6;{% endif %}">
+                        <th style="padding: 6px 2px; text-align: center; font-size: 9px; color: #01579b; background: #e3f2fd; font-weight: bold; {% if loop.index == 4 %}border-right: 1px solid #dee2e6;{% endif %} word-wrap: break-word; overflow-wrap: break-word;">
                             {{ month_label }}
                         </th>
                         {% endfor %}
                         
                         <!-- Last 4 Weeks - Actual week date ranges -->
                         {% for week_label in header_weeks %}
-                        <th colspan="2" style="padding: 8px 5px; text-align: center; font-size: 10px; color: #004d40; background: #e0f2f1; font-weight: bold; {% if loop.index == 4 %}border-right: 1px solid #dee2e6;{% endif %}">
+                        <th style="padding: 6px 2px; text-align: center; font-size: 9px; color: #004d40; background: #e0f2f1; font-weight: bold; {% if loop.index == 4 %}border-right: 1px solid #dee2e6;{% endif %} word-wrap: break-word; overflow-wrap: break-word;">
                             {{ week_label }}
                         </th>
                         {% endfor %}
                         
                         <!-- Last 4 Days - Actual day dates -->
                         {% for day_label in header_days %}
-                        <th colspan="2" style="padding: 8px 5px; text-align: center; font-size: 10px; color: #e65100; background: #fff3e0; font-weight: bold; {% if loop.index == 4 %}border-right: 1px solid #dee2e6;{% endif %}">
+                        <th style="padding: 6px 2px; text-align: center; font-size: 9px; color: #e65100; background: #fff3e0; font-weight: bold; {% if loop.index == 4 %}border-right: 1px solid #dee2e6;{% endif %} word-wrap: break-word; overflow-wrap: break-word;">
                             {{ day_label }}
                         </th>
                         {% endfor %}
                         
-                        <!-- Best columns -->
-                        <th colspan="2" style="padding: 10px 8px; text-align: center; font-size: 11px; color: #4a148c; background: #f3e5f5; border-right: 1px solid #dee2e6;">
-                            <div>Avg (Hrs)</div>
-                            <div style="font-weight: normal; font-size: 10px; opacity: 0.8;">Count in circle</div>
-                        </th>
-                        <th colspan="2" style="padding: 10px 8px; text-align: center; font-size: 11px; color: #b71c1c; background: #ffebee; border-right: 1px solid #dee2e6;">
-                            <div>Avg (Hrs)</div>
-                            <div style="font-weight: normal; font-size: 10px; opacity: 0.8;">Count in circle</div>
-                        </th>
-                        <th colspan="2" style="padding: 10px 8px; text-align: center; font-size: 11px; color: #1b5e20; background: #e8f5e9;">
-                            <div>Avg (Hrs)</div>
-                            <div style="font-weight: normal; font-size: 10px; opacity: 0.8;">Count in circle</div>
-                        </th>
+                        <!-- Best columns removed since they are rowspan=2 in first row -->
                     </tr>
                 </thead>
                 <tbody>
@@ -119,113 +134,113 @@
                         onmouseout="this.style.background='{% if loop.index % 2 == 0 %}#f8f9fa{% else %}white{% endif %}'">
                         
                         <!-- Source Station -->
-                        <td style="padding: 12px 10px; font-weight: 700; color: #1f3a5f; border-right: 1px solid #dee2e6; position: sticky; left: 0; background: inherit; z-index: 5;">
+                        <td style="padding: 10px 4px; font-weight: 700; color: #1f3a5f; border-right: 1px solid #dee2e6; position: sticky; left: 0; background: inherit; z-index: 5; font-size: 11px; word-wrap: break-word; overflow-wrap: break-word;">
                             {{ item.source }}
                         </td>
                         
                         <!-- Last 4 Months - Individual month columns -->
                         {% for month in item.months_data[:4] %}
-                        <td colspan="2" style="padding: 10px 6px; text-align: center; background: rgba(227, 242, 253, 0.3); {% if loop.index == 4 %}border-right: 1px solid #dee2e6;{% endif %}">
+                        <td style="padding: 8px 4px; text-align: center; background: rgba(227, 242, 253, 0.3); {% if loop.index == 4 %}border-right: 1px solid #dee2e6;{% endif %}">
                             {% if month.avg %}
-                            <div style="font-weight: 700; color: #0277bd; font-size: 14px; margin-bottom: 5px;">
+                            <div style="font-weight: 700; color: #0277bd; font-size: 13px; margin-bottom: 4px;">
                                 {{ month.avg }}
                             </div>
-                            <div style="display: inline-block; background: #1976d2; color: white; border-radius: 50%; width: 36px; height: 36px; line-height: 36px; font-weight: bold; font-size: 12px;">
+                            <div style="display: inline-block; background: #1976d2; color: white; border-radius: 50%; width: 28px; height: 28px; line-height: 28px; font-weight: bold; font-size: 10px;">
                                 {{ month.count }}
                             </div>
                             {% else %}
-                            <div style="color: #999; font-size: 14px;">—</div>
+                            <div style="color: #999; font-size: 13px;">—</div>
                             {% endif %}
                         </td>
                         {% endfor %}
                         <!-- Fill empty month slots if less than 4 -->
                         {% for i in range(4 - item.months_data|length) %}
-                        <td colspan="2" style="padding: 10px 6px; text-align: center; background: rgba(227, 242, 253, 0.3); {% if loop.index == (4 - item.months_data|length) %}border-right: 1px solid #dee2e6;{% endif %}">
-                            <div style="color: #999; font-size: 12px;">—</div>
+                        <td style="padding: 8px 4px; text-align: center; background: rgba(227, 242, 253, 0.3); {% if loop.index == (4 - item.months_data|length) %}border-right: 1px solid #dee2e6;{% endif %}">
+                            <div style="color: #999; font-size: 11px;">—</div>
                         </td>
                         {% endfor %}
                         
                         <!-- Last 4 Weeks - Individual week columns -->
                         {% for week in item.weeks_data[:4] %}
-                        <td colspan="2" style="padding: 10px 6px; text-align: center; background: rgba(224, 242, 241, 0.3); {% if loop.index == 4 %}border-right: 1px solid #dee2e6;{% endif %}">
+                        <td style="padding: 8px 4px; text-align: center; background: rgba(224, 242, 241, 0.3); {% if loop.index == 4 %}border-right: 1px solid #dee2e6;{% endif %}">
                             {% if week.avg %}
-                            <div style="font-weight: 700; color: #00796b; font-size: 14px; margin-bottom: 5px;">
+                            <div style="font-weight: 700; color: #00796b; font-size: 13px; margin-bottom: 4px;">
                                 {{ week.avg }}
                             </div>
-                            <div style="display: inline-block; background: #00897b; color: white; border-radius: 50%; width: 36px; height: 36px; line-height: 36px; font-weight: bold; font-size: 12px;">
+                            <div style="display: inline-block; background: #00897b; color: white; border-radius: 50%; width: 28px; height: 28px; line-height: 28px; font-weight: bold; font-size: 10px;">
                                 {{ week.count }}
                             </div>
                             {% else %}
-                            <div style="color: #999; font-size: 14px;">—</div>
+                            <div style="color: #999; font-size: 13px;">—</div>
                             {% endif %}
                         </td>
                         {% endfor %}
                         <!-- Fill empty week slots if less than 4 -->
                         {% for i in range(4 - item.weeks_data|length) %}
-                        <td colspan="2" style="padding: 10px 6px; text-align: center; background: rgba(224, 242, 241, 0.3); {% if loop.index == (4 - item.weeks_data|length) %}border-right: 1px solid #dee2e6;{% endif %}">
-                            <div style="color: #999; font-size: 12px;">—</div>
+                        <td style="padding: 8px 4px; text-align: center; background: rgba(224, 242, 241, 0.3); {% if loop.index == (4 - item.weeks_data|length) %}border-right: 1px solid #dee2e6;{% endif %}">
+                            <div style="color: #999; font-size: 11px;">—</div>
                         </td>
                         {% endfor %}
                         
                         <!-- Last 4 Days - Individual day columns -->
                         {% for day in item.days_data[:4] %}
-                        <td colspan="2" style="padding: 10px 6px; text-align: center; background: rgba(255, 243, 224, 0.3); {% if loop.index == 4 %}border-right: 1px solid #dee2e6;{% endif %}">
+                        <td style="padding: 8px 4px; text-align: center; background: rgba(255, 243, 224, 0.3); {% if loop.index == 4 %}border-right: 1px solid #dee2e6;{% endif %}">
                             {% if day.avg %}
-                            <div style="font-weight: 700; color: #f57c00; font-size: 14px; margin-bottom: 5px;">
+                            <div style="font-weight: 700; color: #f57c00; font-size: 13px; margin-bottom: 4px;">
                                 {{ day.avg }}
                             </div>
-                            <div style="display: inline-block; background: #f57c00; color: white; border-radius: 50%; width: 36px; height: 36px; line-height: 36px; font-weight: bold; font-size: 12px;">
+                            <div style="display: inline-block; background: #f57c00; color: white; border-radius: 50%; width: 28px; height: 28px; line-height: 28px; font-weight: bold; font-size: 10px;">
                                 {{ day.count }}
                             </div>
                             {% else %}
-                            <div style="color: #999; font-size: 14px;">—</div>
+                            <div style="color: #999; font-size: 13px;">—</div>
                             {% endif %}
                         </td>
                         {% endfor %}
                         <!-- Fill empty day slots if less than 4 -->
                         {% for i in range(4 - item.days_data|length) %}
-                        <td colspan="2" style="padding: 10px 6px; text-align: center; background: rgba(255, 243, 224, 0.3); {% if loop.index == (4 - item.days_data|length) %}border-right: 1px solid #dee2e6;{% endif %}">
-                            <div style="color: #999; font-size: 12px;">—</div>
+                        <td style="padding: 8px 4px; text-align: center; background: rgba(255, 243, 224, 0.3); {% if loop.index == (4 - item.days_data|length) %}border-right: 1px solid #dee2e6;{% endif %}">
+                            <div style="color: #999; font-size: 11px;">—</div>
                         </td>
                         {% endfor %}
                         
                         <!-- Best Monthly -->
-                        <td colspan="2" style="padding: 12px 8px; text-align: center; background: rgba(243, 229, 245, 0.4); border-right: 1px solid #dee2e6;">
-                            <div style="font-weight: 700; color: #7b1fa2; font-size: 15px; margin-bottom: 6px;">
+                        <td style="padding: 10px 4px; text-align: center; background: rgba(243, 229, 245, 0.4); border-right: 1px solid #dee2e6;">
+                            <div style="font-weight: 700; color: #7b1fa2; font-size: 13px; margin-bottom: 4px;">
                                 {{ item.best_monthly if item.best_monthly else '—' }}
                             </div>
-                            <div style="display: inline-block; background: #7b1fa2; color: white; border-radius: 50%; width: 42px; height: 42px; line-height: 42px; font-weight: bold; font-size: 13px; cursor: help;" 
+                            <div style="display: inline-block; background: #7b1fa2; color: white; border-radius: 50%; width: 32px; height: 32px; line-height: 32px; font-weight: bold; font-size: 11px; cursor: help;" 
                                  title="Rake count in the best performing month">
                                 {{ item.best_monthly_count if item.best_monthly_count else 0 }}
                             </div>
                         </td>
                         
                         <!-- Best Fortnightly -->
-                        <td colspan="2" style="padding: 12px 8px; text-align: center; background: rgba(255, 235, 238, 0.4); border-right: 1px solid #dee2e6;">
-                            <div style="font-weight: 700; color: #c62828; font-size: 15px; margin-bottom: 6px;">
+                        <td style="padding: 10px 4px; text-align: center; background: rgba(255, 235, 238, 0.4); border-right: 1px solid #dee2e6;">
+                            <div style="font-weight: 700; color: #c62828; font-size: 13px; margin-bottom: 4px;">
                                 {{ item.best_fortnightly if item.best_fortnightly else '—' }}
                             </div>
-                            <div style="display: inline-block; background: #c62828; color: white; border-radius: 50%; width: 42px; height: 42px; line-height: 42px; font-weight: bold; font-size: 13px; cursor: help;" 
+                            <div style="display: inline-block; background: #c62828; color: white; border-radius: 50%; width: 32px; height: 32px; line-height: 32px; font-weight: bold; font-size: 11px; cursor: help;" 
                                  title="Rake count in the best performing fortnight">
                                 {{ item.best_fortnightly_count if item.best_fortnightly_count else 0 }}
                             </div>
                         </td>
                         
                         <!-- Best Weekly -->
-                        <td colspan="2" style="padding: 12px 8px; text-align: center; background: rgba(232, 245, 233, 0.4);">
-                            <div style="font-weight: 700; color: #2e7d32; font-size: 15px; margin-bottom: 6px;">
+                        <td style="padding: 10px 4px; text-align: center; background: rgba(232, 245, 233, 0.4); border-right: 1px solid #dee2e6;">
+                            <div style="font-weight: 700; color: #2e7d32; font-size: 13px; margin-bottom: 4px;">
                                 {{ item.best_weekly if item.best_weekly else '—' }}
                             </div>
-                            <div style="display: inline-block; background: #2e7d32; color: white; border-radius: 50%; width: 42px; height: 42px; line-height: 42px; font-weight: bold; font-size: 13px; cursor: help;" 
+                            <div style="display: inline-block; background: #2e7d32; color: white; border-radius: 50%; width: 32px; height: 32px; line-height: 32px; font-weight: bold; font-size: 11px; cursor: help;" 
                                  title="Rake count in the best performing week">
                                 {{ item.best_weekly_count if item.best_weekly_count else 0 }}
                             </div>
                         </td>
                         
                         <!-- Outliers Link -->
-                        <td style="padding: 12px 8px; text-align: center; border-left: 2px solid #dee2e6; background: rgba(251, 233, 231, 0.4);">
+                        <td style="padding: 10px 4px; text-align: center; border-left: 2px solid #dee2e6; background: rgba(251, 233, 231, 0.4);">
                             <a href="/source_outliers/{{ item.source }}?commodity={{ item.commodity }}&destination={{ item.destination }}" 
-                               style="color: #d84315; text-decoration: none; font-weight: bold; padding: 6px 12px; background: white; border: 1px solid #d84315; border-radius: 4px; display: inline-block; transition: all 0.2s;"
+                               style="color: #d84315; text-decoration: none; font-weight: bold; padding: 4px 8px; background: white; border: 1px solid #d84315; border-radius: 4px; display: inline-block; transition: all 0.2s; font-size: 10px;"
                                onmouseover="this.style.background='#d84315'; this.style.color='white';"
                                onmouseout="this.style.background='white'; this.style.color='#d84315';">
                                 View ⚠️
