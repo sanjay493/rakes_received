@@ -86,9 +86,56 @@ def clean_data(df):
     # Units cleanup
     df["totl_unts"] = df["totl_unts"].astype(str).str.split(r"\+").str[0]
     df["totl_unts"] = pd.to_numeric(df["totl_unts"], errors="coerce")
+     # Sinding normalization
+    df["sttn_from"] = df["sttn_from"].replace({
+        "BYFS":"Bolani",
+        "HLSR":"Kalta",
+        "PBSB":"Barsua-Taldih",
+        "FOS":"Kiriburu Fines",
+        "SOBK":"Kiriburu Lumps",
+        "SSMK":"Meghahatuburu",
+        "ISCG":"Gua",
+        "IISM":"Manoharpur",
+        "SONU":"SONU Jodhpur",
+        "CBSP":"Cargo Berth Siding Paradeep Port",
+        "DPCB":"DHAMRA PORT",
+        "HDCB":"HALDIA DOCKS",
+        "DDSP":"Deep Draught Berths Paradeep Port",
+        "VSPV":"VIZAG SEAPORT",
+        "VGSD":"VIZAG GENERAL CARGO BERTH",
+        "MGPV":"ADANI GANGAVARAM PORT",
+        "VZP":"VISHAKHAPATNAM-PORT",
+
+
+
+    })
 
     # Commodity normalization
-    df["cmdt"] = df["cmdt"].replace({"IOST": "IORE", "IORE": "IORE"})
+    df["cmdt"] = df["cmdt"].replace(
+        {"IOST": "IRON ORE",
+          "IORE": "IRON ORE", 
+          "DLMT":"DOLOMITE ORES",
+          "DLST":"DOLOMITE ORES",
+          "FOIL":"FURNACE OIL",
+          "IMCL":"IMPORTED COAL",
+          "IS":"IRON & STEEL",
+          "LSST":"LIME STONE ORES",
+          "LST":"LIME STONE ORES",
+          "METL":"SILICO MANGANESE",
+          "NCOL":"NON PROGRAMMED COAL",
+          "NMCL":"NON PROGRAMMED COAL",
+          "NPBC":"NON PROGRAMMED COAL",
+          "NPHC":"NON PROGRAMMED COAL",
+          "NSTC":"NON PROGRAMMED COAL",
+          "STC":"COAL",
+          "PBC":"COAL",
+          "PHC":"COAL",
+          "PIOR":"PELLET",
+          "PIST":"PELLET",
+          "SINT":"SINTER",
+          
+          
+          })
 
     # ------------------ PATCHED sttn_to LOGIC ------------------
 
@@ -109,11 +156,11 @@ def clean_data(df):
 
     # Drop invalid rows
     df = df.dropna(subset=["received_time", "transit_time_hrs"])
+    df.to_csv("cleaned_data_debug.csv", index=False)  # Debugging line
 
     return df
 
 # ------------------ INSERT WITH DEDUP ------------------
-
 def insert_cleaned_data(df):
     if df.empty:
         return 0, 0
@@ -123,7 +170,6 @@ def insert_cleaned_data(df):
     total = len(df)
 
     try:
-        # Prepare data
         records = [
             {
                 "sr_no": row["sr_no"],
@@ -140,19 +186,23 @@ def insert_cleaned_data(df):
             for _, row in df.iterrows()
         ]
 
-        stmt = insert(Rake).values(records)
-        stmt = stmt.on_conflict_do_nothing(
-            index_elements=["received_time", "sttn_from", "sttn_to","cmdt", "rake_type", "dispatched_time"]
-        )
+        # Batch insert to avoid SQLite param limit
+        chunksize = 50  # Adjust if needed (50 * 10 cols = 500 params < 999 limit)
+        for i in range(0, len(records), chunksize):
+            chunk = records[i:i + chunksize]
+            stmt = insert(Rake).values(chunk)
+            stmt = stmt.on_conflict_do_nothing(
+                index_elements=["received_time", "sttn_from", "sttn_to", "cmdt", "rake_type", "dispatched_time"]
+            )
+            result = session.execute(stmt)
+            inserted += result.rowcount  # Accumulate inserted count
 
-        result = session.execute(stmt)
-        inserted = result.rowcount
         session.commit()
 
     except Exception as e:
         session.rollback()
         print("Bulk upsert failed:", str(e))
-        # fallback
+        # fallback (but with batching, this should rarely trigger)
         inserted, skipped = fallback_insert(session, records)
         total = inserted + skipped
 
@@ -162,7 +212,6 @@ def insert_cleaned_data(df):
     skipped = total - inserted
     print(f"Upload summary → Inserted: {inserted}  Skipped/duplicates: {skipped}")
     return inserted, skipped
-
 
 def fallback_insert(session, records):
     inserted = 0
@@ -410,9 +459,17 @@ def dashboard():
                     textfont=dict(size=10, color='rgb(56, 142, 60)'),
                     yaxis='y'
                 ))
-                
+                title_text = (
+                   f"<span style='font-size:19px; font-weight:bold; color:#01579b; '>"
+                   f"Last 30 Days Analysis of Received Rakes</span><br>"
+                   f"<span style='font-size:18px; font-weight:bold; color:#ef6c00;'>"
+                   f"Received Rakes – {selected_unit}</span>"
+                   "<br>"
+                   f"<span style='font-size:12px; color:#616161;'>"
+                   f"Source: {source_label}  •  Commodity: {commodity_label}  •  Rake Type: {rake_type_label}"
+                   "</span>")
                 fig.update_layout(
-                    title=f"Last 30 Days Analysis - {selected_unit}",
+                    title=title_text,
                     xaxis=dict(title="Date"),
                     yaxis=dict(
                         title=dict(text="Transit Time (Hours)", font=dict(color="rgb(76, 175, 80)")),
@@ -432,14 +489,20 @@ def dashboard():
             elif analysis_type == "weekly":
                 result = (
                     df.set_index("received_time")
-                      .resample("W")
+                      .resample("W-MON", label='left', closed='left')
                       .agg({'transit_time_hrs': 'mean', 'sttn_from': 'count'})
                       .reset_index()
                 )
                 result.columns = ["week", "avg_transit_time", "rake_count"]
                 result['avg_transit_time'] = result['avg_transit_time'].round(2)  # Round to 2 decimals
                 result = result.dropna()
-                
+                # Create clear range labels (e.g., "03 Nov – 09 Nov")
+                result['week_label'] = result['week'].apply(
+                lambda x: f"{x.strftime('%d %b')} – {(x + pd.Timedelta(days=6)).strftime('%d %b')}"
+                )
+                # If you want year only on first/last: customize further if needed
+               
+               
                 # Detect outliers using IQR method
                 Q1 = df['transit_time_hrs'].quantile(0.25)
                 Q3 = df['transit_time_hrs'].quantile(0.75)
@@ -454,7 +517,7 @@ def dashboard():
                 fig = go.Figure()
                 
                 fig.add_trace(go.Bar(
-                    x=result['week'],
+                    x=result['week_label'],
                     y=result['rake_count'],
                     name='Rake Count',
                     marker_color='rgba(255, 152, 0, 0.7)',  # Orange
@@ -465,7 +528,7 @@ def dashboard():
                 ))
                 
                 fig.add_trace(go.Scatter(
-                    x=result['week'],
+                    x=result['week_label'],
                     y=result['avg_transit_time'],
                     name='Avg Transit Time',
                     mode='lines+markers+text',
@@ -476,10 +539,19 @@ def dashboard():
                     textfont=dict(size=10, color='rgb(123, 31, 162)'),
                     yaxis='y'
                 ))
-                
+                title_text = (
+                   f"<span style='font-size:19px; font-weight:bold; color:#01579b; '>"
+                   f"Weekly Average Analysis of Received Rakes </span><br>"
+                   f"<span style='font-size:18px; font-weight:bold; color:#ef6c00;'>"
+                   f"Received Rakes – {selected_unit}</span>"
+                     "<br>"
+                  
+                   f"<span style='font-size:12px; color:#616161;'>"
+                   f"Source: {source_label}  •  Commodity: {commodity_label}  •  Rake Type: {rake_type_label}"
+                   "</span>")
                 fig.update_layout(
-                    title=f"Weekly Average Analysis - {selected_unit}",
-                    xaxis=dict(title="Week"),
+                    title=title_text,
+                    xaxis=dict(title="Week",tickangle=-45),
                     yaxis=dict(
                         title=dict(text="Transit Time (Hours)", font=dict(color="rgb(156, 39, 176)")),
                         tickfont=dict(color="rgb(156, 39, 176)")
@@ -498,13 +570,23 @@ def dashboard():
             elif analysis_type == "fortnightly":
                 result = (
                     df.set_index("received_time")
-                      .resample("2W")
+                      .resample("2W-SUN", label='left', closed='left')
                       .agg({'transit_time_hrs': 'mean', 'sttn_from': 'count'})
                       .reset_index()
                 )
-                result.columns = ["fortnight", "avg_transit_time", "rake_count"]
+                result.columns = ["fortnight_start", "avg_transit_time", "rake_count"]
                 result['avg_transit_time'] = result['avg_transit_time'].round(2)  # Round to 2 decimals
                 result = result.dropna()
+                # Create clear range labels: "21 Sep – 04 Oct"
+                result['fortnight_label'] = result['fortnight_start'].apply(
+                lambda x: f"{x.strftime('%d %b')} – {(x + pd.Timedelta(days=13)).strftime('%d %b')}"
+                    )
+
+                # Optional: Add year only when it changes (cleaner for multi-year data)
+                # But for your 2025–2026 range, full year on first/last or all is fine
+                # result['fortnight_label'] += result['fortnight_start'].dt.year.astype(str)
+
+
                 
                 # Detect outliers using IQR method
                 Q1 = df['transit_time_hrs'].quantile(0.25)
@@ -520,7 +602,7 @@ def dashboard():
                 fig = go.Figure()
                 
                 fig.add_trace(go.Bar(
-                    x=result['fortnight'],
+                    x=result['fortnight_label'],
                     y=result['rake_count'],
                     name='Rake Count',
                     marker_color='rgba(255, 87, 34, 0.7)',  # Deep Orange
@@ -531,7 +613,7 @@ def dashboard():
                 ))
                 
                 fig.add_trace(go.Scatter(
-                    x=result['fortnight'],
+                    x=result['fortnight_label'],
                     y=result['avg_transit_time'],
                     name='Avg Transit Time',
                     mode='lines+markers+text',
@@ -542,10 +624,27 @@ def dashboard():
                     textfont=dict(size=10, color='rgb(0, 121, 107)'),
                     yaxis='y'
                 ))
-                
+                title_text = (
+                   f"<span style='font-size:19px; font-weight:bold; color:#01579b; '>"
+                   f"Fortnightly Average Analysis of Received Rakes</span><br>"
+                   f"<span style='font-size:18px; font-weight:bold; color:#ef6c00;'>"
+                   f"Received Rakes – {selected_unit}</span>"
+                   "<br>"
+                   f"<span style='font-size:12px; color:#616161;'>"
+                   f"Source: {source_label}  •  Commodity: {commodity_label}  •  Rake Type: {rake_type_label}"
+                   "</span>")
                 fig.update_layout(
-                    title=f"Fortnightly Average Analysis - {selected_unit}",
-                    xaxis=dict(title="Fortnight"),
+                    title=dict(
+                    text=title_text,
+                    font=dict(size=20),  # fallback size – actual sizes come from spans
+                    x=0.5,
+                    xanchor='center',
+                    y=0.97,
+                    pad=dict(t=20)),
+                    # If your Plotly version doesn't support subtitle yet, use <br> + <span> as in Option 1
+                    margin=dict(t=80),
+
+                    xaxis=dict(title="Fortnight_Range",tickangle=-30,tickfont=dict(size=11)),
                     yaxis=dict(
                         title=dict(text="Transit Time (Hours)", font=dict(color="rgb(0, 150, 136)")),
                         tickfont=dict(color="rgb(0, 150, 136)")
@@ -561,17 +660,18 @@ def dashboard():
                     legend=dict(x=0.01, y=0.99, bgcolor='rgba(255,255,255,0.8)')
                 )
                 
-            elif analysis_type == "monthly":
+            elif analysis_type == "monthly": 
                 result = (
-                    df.set_index("received_time")
-                      .resample("ME")  # Changed from "M" to "ME" (Month End)
-                      .agg({'transit_time_hrs': 'mean', 'sttn_from': 'count'})
-                      .reset_index()
-                )
+                df.set_index("received_time")
+                .resample("MS")   # ← Add this: label left/start
+                .agg({'transit_time_hrs': 'mean', 'sttn_from': 'count'})
+                .reset_index()
+                    )
                 result.columns = ["month", "avg_transit_time", "rake_count"]
-                result['avg_transit_time'] = result['avg_transit_time'].round(2)  # Round to 2 decimals
+                result['month'] = result['month'].dt.strftime('%b %Y')  # Now shows Sep 2025 for Sep data
+                result['avg_transit_time'] = result['avg_transit_time'].round(2)
                 result = result.dropna()
-                
+                        
                 # Detect outliers using IQR method
                 Q1 = df['transit_time_hrs'].quantile(0.25)
                 Q3 = df['transit_time_hrs'].quantile(0.75)
@@ -608,9 +708,17 @@ def dashboard():
                     textfont=dict(size=10, color='rgb(194, 24, 91)'),
                     yaxis='y'
                 ))
-                
+                title_text = (
+                   f"<span style='font-size:19px; font-weight:bold; color:#01579b; '>"
+                   f"Monthly Average Analysis of Received Rakes</span><br>"
+                   f"<span style='font-size:18px; font-weight:bold; color:#ef6c00;'>"
+                   f"Received Rakes – {selected_unit}</span>"
+                    "<br>"
+                   f"<span style='font-size:12px; color:#616161;'>"
+                   f"Source: {source_label}  •  Commodity: {commodity_label}  •  Rake Type: {rake_type_label}"
+                   "</span>")
                 fig.update_layout(
-                    title=f"Monthly Average Analysis - {selected_unit}",
+                    title=title_text,
                     xaxis=dict(title="Month"),
                     yaxis=dict(
                         title=dict(text="Transit Time (Hours)", font=dict(color="rgb(233, 30, 99)")),
@@ -647,7 +755,351 @@ def dashboard():
         rake_type_label=rake_type_label,
         graph_html=graph_html,
         outliers=outliers_df.to_dict('records') if not outliers_df.empty else [],
-        outlier_count=len(outliers_df)
+        outlier_count=len(outliers_df),
+        total_records=len(df) if not df.empty else 0
+    )
+
+@app.route("/commodity_analysis")
+def commodity_analysis():
+    """Commodity-wise analysis dashboard showing all plants grouped by source station"""
+    from datetime import datetime, timedelta
+    
+    session_db = SessionDB()
+    
+    # Get filter parameters
+    selected_commodity = request.args.get("commodity", "")
+    selected_destination = request.args.get("destination", "")
+    
+    # Get all unique values for filters
+    commodities = [r[0] for r in session_db.query(Rake.cmdt).distinct().all() if r[0]]
+    destinations = [r[0] for r in session_db.query(Rake.sttn_to).distinct().all() if r[0]]
+    
+    # Build base query
+    query = session_db.query(Rake)
+    
+    # Apply filters if selected
+    if selected_commodity:
+        query = query.filter(Rake.cmdt == selected_commodity)
+    if selected_destination:
+        query = query.filter(Rake.sttn_to == selected_destination)
+    
+    # Get all data
+    all_rows = query.all()
+    df = query_to_df(all_rows)
+    
+    # Prepare data structure for display
+    analysis_data = []
+    
+    # Calculate header labels for the table based on filtered data
+    header_months = []
+    header_weeks = []
+    header_days = []
+    
+    if not df.empty:
+        df["received_time"] = pd.to_datetime(df["received_time"])
+        
+        # Calculate date ranges based on actual data, not current date
+        max_date = df['received_time'].max()
+        min_date = df['received_time'].min()
+        print("Last Record Date", max_date)
+        # Use actual data range for calculations
+        yesterday_timestamp = pd.Timestamp("today") - pd.Timedelta(days=1)
+        last_4_months = max_date - timedelta(days=120)
+        last_8_weeks = yesterday_timestamp - timedelta(days=28)
+        last_4_days = max_date - timedelta(days=4)
+        print("Last_8_weeks:", last_8_weeks)
+        # Generate header labels for months (last 4 months from actual data)
+        temp_df = df[df['received_time'] >= last_4_months]
+        if len(temp_df) > 0:
+            month_headers = (
+                temp_df.set_index('received_time')
+                .resample('MS')
+                .size()
+                .reset_index()
+            )
+            # Only include months that actually have data
+            month_headers = month_headers[month_headers[0] > 0]
+            month_headers = month_headers.tail(4)
+            for _, row in month_headers.iterrows():
+                header_months.append(row['received_time'].strftime("%b'%y"))
+        
+        # Pad if less than 4
+        while len(header_months) < 4:
+            header_months.insert(0, "—")
+        
+        # Generate header labels for weeks (last 4 weeks from actual data)
+        anchor_date = (max_date.floor('D') - pd.Timedelta(days=1)).normalize()
+        
+        temp_df = df[df['received_time'] >= last_8_weeks]
+        if len(temp_df) > 0:
+            week_headers = (
+                temp_df.set_index('received_time')
+                .resample('W')
+                .size()
+                .reset_index()
+            )
+          
+            print(week_headers)
+            # week_headers = week_headers.tail(4)
+            for _, row in week_headers.iterrows():
+                week_start = row['received_time']
+                week_end = min(week_start + timedelta(days=6), max_date)  # Don't go beyond max_date
+
+                print(f"Week Start: {week_start}, Week End: {week_end}")
+                # If week end is in same month as start
+                if week_start.month == week_end.month:
+                    header_weeks.append(f"{week_start.strftime('%d')}-{week_end.strftime('%d %b')}")
+                else:
+                    # Week spans two months
+                    header_weeks.append(f"{week_start.strftime('%d %b')}-{week_end.strftime('%d %b')}")
+        
+        # Pad if less than 4
+        while len(header_weeks) < 4:
+            header_weeks.insert(0, "—")
+        
+        # Generate header labels for days (last 4 days from actual data)
+        temp_df = df[df['received_time'] >= last_4_days]
+        if len(temp_df) > 0:
+            day_headers = (
+                temp_df.set_index('received_time')
+                .resample('D')
+                .size()
+                .reset_index()
+            )
+            
+            day_headers = day_headers.tail(4)
+            for _, row in day_headers.iterrows():
+                header_days.append(row['received_time'].strftime('%d-%b'))
+        
+        # Pad if less than 4
+        while len(header_days) < 4:
+            header_days.insert(0, "—")
+        
+        # Group by commodity, destination, and source
+        grouped = df.groupby(['cmdt', 'sttn_to', 'sttn_from'])
+        
+        for (commodity, destination, source), group_df in grouped:
+            # Use the same date ranges as calculated for headers
+            # Last 4 months - month by month breakdown
+            df_4m = group_df[group_df['received_time'] >= last_4_months]
+            months_data = []
+            if len(df_4m) > 0:
+                monthly_breakdown = (
+                    df_4m.set_index('received_time')
+                    .resample('MS')
+                    .agg({'transit_time_hrs': 'mean', 'sttn_from': 'count'})
+                    .reset_index()
+                )
+                # Get last 4 months
+                monthly_breakdown = monthly_breakdown.tail(4)
+                for _, row in monthly_breakdown.iterrows():
+                    if row['sttn_from'] > 0:  # Only add if data exists
+                        months_data.append({
+                            'label': row['received_time'].strftime('%b %y'),
+                            'avg': round(row['transit_time_hrs'], 2) if pd.notna(row['transit_time_hrs']) else None,
+                            'count': int(row['sttn_from'])
+                        })
+            
+            # Last 8 weeks - week by week breakdown (showing last 4 weeks)
+            df_8w = group_df[group_df['received_time'] >= last_8_weeks]
+            weeks_data = []
+            if len(df_8w) > 0:
+                weekly_breakdown = (
+                    df_8w.set_index('received_time')
+                    .resample('W')
+                    .agg({'transit_time_hrs': 'mean', 'sttn_from': 'count'})
+                    .reset_index()
+                )
+                # Get last 4 weeks
+                weekly_breakdown = weekly_breakdown.tail(4)
+                for _, row in weekly_breakdown.iterrows():
+                    if row['sttn_from'] > 0:  # Only add if data exists
+                        week_start = row['received_time']
+                        weeks_data.append({
+                            'label': week_start.strftime('%d-%m'),
+                            'avg': round(row['transit_time_hrs'], 2) if pd.notna(row['transit_time_hrs']) else None,
+                            'count': int(row['sttn_from'])
+                        })
+            
+            # Last 4 days - day by day breakdown
+            df_4d = group_df[group_df['received_time'] >= last_4_days]
+            days_data = []
+            if len(df_4d) > 0:
+                daily_breakdown = (
+                    df_4d.set_index('received_time')
+                    .resample('D')
+                    .agg({'transit_time_hrs': 'mean', 'sttn_from': 'count'})
+                    .reset_index()
+                )
+                # Get last 4 days
+                daily_breakdown = daily_breakdown.tail(4)
+                for _, row in daily_breakdown.iterrows():
+                    if row['sttn_from'] > 0:  # Only add if data exists
+                        days_data.append({
+                            'label': row['received_time'].strftime('%d-%b'),
+                            'avg': round(row['transit_time_hrs'], 2) if pd.notna(row['transit_time_hrs']) else None,
+                            'count': int(row['sttn_from'])
+                        })
+            
+            # Calculate overall averages for compatibility
+            avg_4m = df_4m['transit_time_hrs'].mean() if len(df_4m) > 0 else None
+            count_4m = len(df_4m)
+            avg_8w = df_8w['transit_time_hrs'].mean() if len(df_8w) > 0 else None
+            count_8w = len(df_8w)
+            avg_4d = df_4d['transit_time_hrs'].mean() if len(df_4d) > 0 else None
+            count_4d = len(df_4d)
+            
+            # Calculate best monthly average (last 12 months from max_date)
+            last_12_months = max_date - timedelta(days=365)
+            df_12m = group_df[group_df['received_time'] >= last_12_months]
+            
+            if len(df_12m) > 0:
+                monthly_avg = (
+                    df_12m.set_index('received_time')
+                    .resample('MS')
+                    .agg({'transit_time_hrs': 'mean', 'sttn_from': 'count'})
+                    .reset_index()
+                )
+                monthly_avg = monthly_avg[monthly_avg['sttn_from'] >= 1]  # At least 1 rake
+                best_monthly_avg = monthly_avg['transit_time_hrs'].min() if len(monthly_avg) > 0 else None
+                best_monthly_count = int(monthly_avg.loc[monthly_avg['transit_time_hrs'] == best_monthly_avg, 'sttn_from'].iloc[0]) if best_monthly_avg else 0
+            else:
+                best_monthly_avg = None
+                best_monthly_count = 0
+            
+            # Calculate best fortnightly average (last 6 months from max_date)
+            last_6_months = max_date - timedelta(days=180)
+            df_6m = group_df[group_df['received_time'] >= last_6_months]
+            
+            if len(df_6m) > 0:
+                fortnightly_avg = (
+                    df_6m.set_index('received_time')
+                    .resample('2W')
+                    .agg({'transit_time_hrs': 'mean', 'sttn_from': 'count'})
+                    .reset_index()
+                )
+                fortnightly_avg = fortnightly_avg[fortnightly_avg['sttn_from'] >= 1]
+                best_fortnightly_avg = fortnightly_avg['transit_time_hrs'].min() if len(fortnightly_avg) > 0 else None
+                best_fortnightly_count = int(fortnightly_avg.loc[fortnightly_avg['transit_time_hrs'] == best_fortnightly_avg, 'sttn_from'].iloc[0]) if best_fortnightly_avg else 0
+            else:
+                best_fortnightly_avg = None
+                best_fortnightly_count = 0
+            
+            # Calculate best weekly average (last 3 months from max_date)
+            last_3_months = max_date - timedelta(days=90)
+            df_3m = group_df[group_df['received_time'] >= last_3_months]
+            
+            if len(df_3m) > 0:
+                weekly_avg = (
+                    df_3m.set_index('received_time')
+                    .resample('W')
+                    .agg({'transit_time_hrs': 'mean', 'sttn_from': 'count'})
+                    .reset_index()
+                )
+                weekly_avg = weekly_avg[weekly_avg['sttn_from'] >= 1]
+                best_weekly_avg = weekly_avg['transit_time_hrs'].min() if len(weekly_avg) > 0 else None
+                best_weekly_count = int(weekly_avg.loc[weekly_avg['transit_time_hrs'] == best_weekly_avg, 'sttn_from'].iloc[0]) if best_weekly_avg else 0
+            else:
+                best_weekly_avg = None
+                best_weekly_count = 0
+            
+            analysis_data.append({
+                'commodity': commodity,
+                'destination': destination,
+                'source': source,
+                'months_data': months_data,
+                'weeks_data': weeks_data,
+                'days_data': days_data,
+                'avg_4m': round(avg_4m, 2) if avg_4m else None,
+                'count_4m': count_4m,
+                'avg_8w': round(avg_8w, 2) if avg_8w else None,
+                'count_8w': count_8w,
+                'avg_4d': round(avg_4d, 2) if avg_4d else None,
+                'count_4d': count_4d,
+                'best_monthly': round(best_monthly_avg, 2) if best_monthly_avg else None,
+                'best_monthly_count': best_monthly_count,
+                'best_fortnightly': round(best_fortnightly_avg, 2) if best_fortnightly_avg else None,
+                'best_fortnightly_count': best_fortnightly_count,
+                'best_weekly': round(best_weekly_avg, 2) if best_weekly_avg else None,
+                'best_weekly_count': best_weekly_count
+            })
+    
+    session_db.close()
+    
+    # Group data by commodity and destination for display
+    grouped_data = {}
+    for item in analysis_data:
+        key = (item['commodity'], item['destination'])
+        if key not in grouped_data:
+            grouped_data[key] = []
+        grouped_data[key].append(item)
+    
+    return render_template(
+        "commodity_analysis.html",
+        grouped_data=grouped_data,
+        commodities=sorted(commodities),
+        destinations=sorted(destinations),
+        selected_commodity=selected_commodity,
+        selected_destination=selected_destination,
+        header_months=header_months,
+        header_weeks=header_weeks,
+        header_days=header_days
+    )
+
+@app.route("/source_outliers/<source_station>")
+def source_outliers(source_station):
+    """Show outliers for a specific source station for the last 1 month"""
+    from datetime import datetime, timedelta
+    
+    session_db = SessionDB()
+    
+    # Get commodity and destination filters from query params
+    commodity = request.args.get("commodity", "")
+    destination = request.args.get("destination", "")
+    
+    # Get last month data
+    last_month = datetime.now() - timedelta(days=30)
+    
+    query = session_db.query(Rake).filter(
+        Rake.sttn_from == source_station,
+        Rake.received_time >= last_month
+    )
+    
+    if commodity:
+        query = query.filter(Rake.cmdt == commodity)
+    if destination:
+        query = query.filter(Rake.sttn_to == destination)
+    
+    rows = query.all()
+    df = query_to_df(rows)
+    
+    outliers_df = pd.DataFrame()
+    total_records = 0
+    
+    if not df.empty:
+        total_records = len(df)
+        
+        # Detect outliers using IQR method
+        Q1 = df['transit_time_hrs'].quantile(0.25)
+        Q3 = df['transit_time_hrs'].quantile(0.75)
+        IQR = Q3 - Q1
+        lower_bound = Q1 - 1.5 * IQR
+        upper_bound = Q3 + 1.5 * IQR
+        
+        outliers_df = df[(df['transit_time_hrs'] < lower_bound) | (df['transit_time_hrs'] > upper_bound)].copy()
+        outliers_df['received_time'] = pd.to_datetime(outliers_df['received_time']).dt.strftime('%d-%m-%Y %H:%M')
+        outliers_df = outliers_df.sort_values('transit_time_hrs', ascending=False)
+    
+    session_db.close()
+    
+    return render_template(
+        "source_outliers.html",
+        source_station=source_station,
+        outliers=outliers_df.to_dict('records') if not outliers_df.empty else [],
+        outlier_count=len(outliers_df),
+        total_records=total_records,
+        commodity=commodity,
+        destination=destination
     )
 
 @app.route("/export", methods=["POST"])

@@ -128,7 +128,7 @@
             <tbody>
                 {% for outlier in outliers %}
                 <tr style="border-bottom: 1px solid #eee; {% if loop.index % 2 == 0 %}background: #fafafa;{% endif %}">
-                    <td style="padding: 10px;">{{ loop.idx }}</td>
+                    <td style="padding: 10px;">{{ loop.index }}</td>
                     <td style="padding: 10px;">{{ outlier.received_time }}</td>
                     <td style="padding: 10px; font-weight: 600; color: #1f3a5f;">{{ outlier.sttn_from }}</td>
                     <td style="padding: 10px; font-weight: 600; color: #1f3a5f;">{{ outlier.sttn_to }}</td>
@@ -143,13 +143,39 @@
         </table>
     </div>
     
-    <div style="margin-top: 15px; padding: 12px; background: #fff3cd; border-left: 4px solid #ffc107; border-radius: 4px;">
-        <strong>📊 Statistics:</strong>
-        <ul style="margin: 8px 0 0 20px; color: #666;">
-            <li>Total records analyzed: {{ outliers|length + outlier_count }}</li>
-            <li>Outliers detected: {{ outlier_count }} ({{ "%.1f"|format((outlier_count * 100.0) / (outliers|length + outlier_count) if (outliers|length + outlier_count) > 0 else 0) }}%)</li>
-            <li>These records may require investigation for delays or data quality issues</li>
-        </ul>
+    <div style="margin-top: 15px; padding: 15px; background: #e3f2fd; border-left: 4px solid #2196f3; border-radius: 4px;">
+        <strong style="color: #1976d2;">📊 Outlier Analysis Summary:</strong>
+        <div style="margin-top: 10px; color: #555;">
+            <div style="margin: 5px 0;">
+                <strong>Total Records in Current Selection:</strong> {{ total_records }}
+                <span style="font-size: 0.9em; color: #777;">(all rakes matching your filters)</span>
+            </div>
+            <div style="margin: 5px 0;">
+                <strong>Normal Transit Records:</strong> {{ total_records - outlier_count }}
+                <span style="font-size: 0.9em; color: #777;">(within expected range)</span>
+            </div>
+            <div style="margin: 5px 0;">
+                <strong>Outlier Records:</strong> {{ outlier_count }}
+                <span style="font-size: 0.9em; color: #777;">({{ "%.1f"|format((outlier_count * 100.0 / total_records) if total_records > 0 else 0) }}% of total)</span>
+            </div>
+        </div>
+        <div style="margin-top: 12px; padding: 10px; background: white; border-radius: 4px; font-size: 0.95em;">
+            <strong>💡 What does this mean?</strong>
+            <ul style="margin: 8px 0 0 20px; color: #666;">
+                {% set outlier_percentage = (outlier_count * 100.0 / total_records) if total_records > 0 else 0 %}
+                {% if outlier_percentage > 20 %}
+                <li style="color: #d32f2f;"><strong>High Alert:</strong> {{ "%.1f"|format(outlier_percentage) }}% outliers indicates significant transit time variability. Immediate investigation recommended.</li>
+                {% elif outlier_percentage > 10 %}
+                <li style="color: #f57c00;"><strong>Moderate Concern:</strong> {{ "%.1f"|format(outlier_percentage) }}% outliers suggests notable variations. Review these records for patterns.</li>
+                {% elif outlier_percentage > 5 %}
+                <li style="color: #fbc02d;"><strong>Worth Monitoring:</strong> {{ "%.1f"|format(outlier_percentage) }}% outliers is within acceptable range but monitor trends over time.</li>
+                {% else %}
+                <li style="color: #388e3c;"><strong>Normal Operation:</strong> {{ "%.1f"|format(outlier_percentage) }}% outliers indicates good consistency in transit times.</li>
+                {% endif %}
+                <li>Outliers are identified using the IQR statistical method (Q1 - 1.5×IQR to Q3 + 1.5×IQR)</li>
+                <li>These records may indicate delays, route issues, or data quality problems requiring investigation</li>
+            </ul>
+        </div>
     </div>
 </div>
 {% endif %}

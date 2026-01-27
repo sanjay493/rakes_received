@@ -1,0 +1,229 @@
+{% extends "base.html" %}
+{% block content %}
+
+<!-- Header -->
+<div class="card" style="background: linear-gradient(135deg, #d32f2f 0%, #b71c1c 100%); color: white;">
+    <h2 style="color: white; margin-bottom: 10px; display: flex; align-items: center; gap: 10px;">
+        <span style="font-size: 1.5em;">⚠️</span>
+        Outlier Analysis - {{ source_station }}
+    </h2>
+    <p style="color: rgba(255,255,255,0.9); margin: 0;">
+        Transit time outliers detected in the last 30 days using IQR statistical method
+    </p>
+</div>
+
+<!-- Back Button -->
+<div style="margin-bottom: 20px;">
+    <a href="/commodity_analysis{% if commodity or destination %}?{% if commodity %}commodity={{ commodity }}{% endif %}{% if commodity and destination %}&{% endif %}{% if destination %}destination={{ destination }}{% endif %}{% endif %}" 
+       style="display: inline-flex; align-items: center; gap: 8px; padding: 10px 20px; background: #1f3a5f; color: white; text-decoration: none; border-radius: 6px; font-weight: bold; transition: all 0.3s;"
+       onmouseover="this.style.background='#162c46'"
+       onmouseout="this.style.background='#1f3a5f'">
+        <span>←</span>
+        <span>Back to Commodity Analysis</span>
+    </a>
+</div>
+
+<!-- Filter Info -->
+{% if commodity or destination %}
+<div class="card" style="background: #e3f2fd; border-left: 4px solid #2196f3;">
+    <div style="display: flex; gap: 20px; flex-wrap: wrap; align-items: center;">
+        <strong style="color: #1565c0;">Active Filters:</strong>
+        {% if commodity %}
+        <div style="background: white; padding: 6px 12px; border-radius: 6px; border: 1px solid #2196f3;">
+            <strong style="color: #1565c0;">Commodity:</strong> <span style="color: #333;">{{ commodity }}</span>
+        </div>
+        {% endif %}
+        {% if destination %}
+        <div style="background: white; padding: 6px 12px; border-radius: 6px; border: 1px solid #2196f3;">
+            <strong style="color: #1565c0;">Destination:</strong> <span style="color: #333;">{{ destination }}</span>
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endif %}
+
+<!-- Summary Stats -->
+<div class="card" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white;">
+    <h3 style="color: white; margin-bottom: 15px;">📊 Summary Statistics</h3>
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">
+        <div style="background: rgba(255,255,255,0.15); padding: 15px; border-radius: 8px;">
+            <div style="font-size: 0.85em; opacity: 0.9; margin-bottom: 5px;">TOTAL RAKES (30 Days)</div>
+            <div style="font-size: 2em; font-weight: bold;">{{ total_records }}</div>
+        </div>
+        <div style="background: rgba(255,255,255,0.15); padding: 15px; border-radius: 8px;">
+            <div style="font-size: 0.85em; opacity: 0.9; margin-bottom: 5px;">OUTLIER RAKES</div>
+            <div style="font-size: 2em; font-weight: bold; color: #ffeb3b;">{{ outlier_count }}</div>
+        </div>
+        <div style="background: rgba(255,255,255,0.15); padding: 15px; border-radius: 8px;">
+            <div style="font-size: 0.85em; opacity: 0.9; margin-bottom: 5px;">OUTLIER PERCENTAGE</div>
+            <div style="font-size: 2em; font-weight: bold; color: #ff5252;">
+                {{ "%.1f"|format((outlier_count * 100.0 / total_records) if total_records > 0 else 0) }}%
+            </div>
+        </div>
+        <div style="background: rgba(255,255,255,0.15); padding: 15px; border-radius: 8px;">
+            <div style="font-size: 0.85em; opacity: 0.9; margin-bottom: 5px;">NORMAL RAKES</div>
+            <div style="font-size: 2em; font-weight: bold; color: #69f0ae;">{{ total_records - outlier_count }}</div>
+        </div>
+    </div>
+</div>
+
+<!-- Outliers Table -->
+{% if outliers and outlier_count > 0 %}
+<div class="card">
+    <h3 style="color: #d32f2f; display: flex; align-items: center; gap: 10px; margin-bottom: 20px;">
+        <span style="font-size: 1.3em;">🔍</span>
+        Detailed Outlier Records
+        <span style="background: #d32f2f; color: white; padding: 4px 12px; border-radius: 12px; font-size: 0.85em;">{{ outlier_count }} records</span>
+    </h3>
+    
+    <div style="overflow-x: auto;">
+        <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
+            <thead>
+                <tr style="background: linear-gradient(to bottom, #f8f9fa 0%, #e9ecef 100%); border-bottom: 3px solid #495057;">
+                    <th style="padding: 14px 12px; text-align: left; font-weight: bold; color: #333;">#</th>
+                    <th style="padding: 14px 12px; text-align: left; font-weight: bold; color: #333;">Received Time</th>
+                    <th style="padding: 14px 12px; text-align: left; font-weight: bold; color: #333;">Source Station</th>
+                    <th style="padding: 14px 12px; text-align: left; font-weight: bold; color: #333;">Destination</th>
+                    <th style="padding: 14px 12px; text-align: left; font-weight: bold; color: #333;">Commodity</th>
+                    <th style="padding: 14px 12px; text-align: left; font-weight: bold; color: #333;">Rake Type</th>
+                    <th style="padding: 14px 12px; text-align: right; font-weight: bold; color: #d32f2f;">Transit Time (Hrs)</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for outlier in outliers %}
+                <tr style="border-bottom: 1px solid #dee2e6; {% if loop.index % 2 == 0 %}background: #f8f9fa;{% else %}background: white;{% endif %} transition: background 0.2s;"
+                    onmouseover="this.style.background='#fff3e0'"
+                    onmouseout="this.style.background='{% if loop.index % 2 == 0 %}#f8f9fa{% else %}white{% endif %}'">
+                    <td style="padding: 12px; font-weight: 600; color: #666;">{{ loop.index }}</td>
+                    <td style="padding: 12px; color: #333;">{{ outlier.received_time }}</td>
+                    <td style="padding: 12px; font-weight: 700; color: #1f3a5f;">{{ outlier.sttn_from }}</td>
+                    <td style="padding: 12px; font-weight: 700; color: #1f3a5f;">{{ outlier.sttn_to }}</td>
+                    <td style="padding: 12px; color: #333;">{{ outlier.cmdt }}</td>
+                    <td style="padding: 12px; color: #555;">{{ outlier.rake_type }}</td>
+                    <td style="padding: 12px; text-align: right; font-weight: bold; color: #d32f2f; font-size: 1.15em;">
+                        {{ outlier.transit_time_hrs }}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Analysis Insights -->
+<div class="card" style="background: #e8f5e9; border-left: 4px solid #4caf50;">
+    <h3 style="color: #2e7d32; margin-bottom: 15px;">💡 Analysis Insights</h3>
+    
+    {% set outlier_percentage = (outlier_count * 100.0 / total_records) if total_records > 0 else 0 %}
+    
+    <div style="background: white; padding: 15px; border-radius: 8px; margin-bottom: 15px;">
+        <strong style="color: #1976d2; font-size: 16px;">📈 Performance Assessment:</strong>
+        <div style="margin-top: 10px; padding: 12px; {% if outlier_percentage > 20 %}background: #ffebee;{% elif outlier_percentage > 10 %}background: #fff3e0;{% elif outlier_percentage > 5 %}background: #fffde7;{% else %}background: #e8f5e9;{% endif %} border-radius: 6px;">
+            {% if outlier_percentage > 20 %}
+            <div style="color: #d32f2f; font-weight: bold; margin-bottom: 8px;">🚨 HIGH ALERT</div>
+            <p style="color: #666; margin: 0;">{{ "%.1f"|format(outlier_percentage) }}% outliers indicates significant transit time variability. This requires immediate investigation and corrective action.</p>
+            {% elif outlier_percentage > 10 %}
+            <div style="color: #f57c00; font-weight: bold; margin-bottom: 8px;">⚠️ MODERATE CONCERN</div>
+            <p style="color: #666; margin: 0;">{{ "%.1f"|format(outlier_percentage) }}% outliers suggests notable variations in transit times. Review these records for patterns and consider process improvements.</p>
+            {% elif outlier_percentage > 5 %}
+            <div style="color: #fbc02d; font-weight: bold; margin-bottom: 8px;">👀 WORTH MONITORING</div>
+            <p style="color: #666; margin: 0;">{{ "%.1f"|format(outlier_percentage) }}% outliers is within acceptable range, but continue monitoring trends over time to prevent deterioration.</p>
+            {% else %}
+            <div style="color: #388e3c; font-weight: bold; margin-bottom: 8px;">✅ NORMAL OPERATION</div>
+            <p style="color: #666; margin: 0;">{{ "%.1f"|format(outlier_percentage) }}% outliers indicates good consistency in transit times. Current operations are performing well.</p>
+            {% endif %}
+        </div>
+    </div>
+    
+    <div style="background: white; padding: 15px; border-radius: 8px;">
+        <strong style="color: #1976d2; font-size: 16px;">🔬 About Outlier Detection:</strong>
+        <ul style="margin: 10px 0 0 20px; color: #666; line-height: 1.8;">
+            <li><strong>Method:</strong> Interquartile Range (IQR) statistical method</li>
+            <li><strong>Detection Range:</strong> Values outside Q1 - 1.5×IQR to Q3 + 1.5×IQR</li>
+            <li><strong>Interpretation:</strong> These are statistically anomalous transit times that warrant investigation</li>
+            <li><strong>Possible Causes:</strong> Route delays, weather conditions, operational issues, equipment problems, or data quality issues</li>
+            <li><strong>Action Items:</strong> Review identified records, investigate root causes, implement corrective measures</li>
+        </ul>
+    </div>
+</div>
+
+{% elif total_records > 0 %}
+<!-- No Outliers Found -->
+<div class="card" style="text-align: center; padding: 60px 20px; background: #e8f5e9; border: 2px solid #4caf50;">
+    <div style="font-size: 64px; margin-bottom: 20px;">✅</div>
+    <h3 style="color: #2e7d32; margin-bottom: 10px;">Excellent Performance!</h3>
+    <p style="color: #666; font-size: 16px; margin: 10px 0;">No outliers detected in the last 30 days for this source station.</p>
+    <p style="color: #999; font-size: 14px;">All {{ total_records }} rakes have transit times within the expected statistical range.</p>
+</div>
+
+{% else %}
+<!-- No Data -->
+<div class="card" style="text-align: center; padding: 60px 20px;">
+    <div style="font-size: 64px; margin-bottom: 20px; opacity: 0.3;">📊</div>
+    <h3 style="color: #666; margin-bottom: 10px;">No Data Available</h3>
+    <p style="color: #999;">No records found for {{ source_station }} in the last 30 days with the selected filters.</p>
+</div>
+{% endif %}
+
+<!-- Export Options -->
+{% if outliers and outlier_count > 0 %}
+<div class="card" style="background: #f5f5f5;">
+    <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 15px;">
+        <div>
+            <h4 style="color: #333; margin: 0 0 5px 0;">📥 Export Data</h4>
+            <p style="color: #666; margin: 0; font-size: 14px;">Download this outlier data for further analysis</p>
+        </div>
+        <button onclick="exportTableToCSV()" 
+                style="padding: 12px 24px; background: #4caf50; color: white; border: none; border-radius: 6px; font-weight: bold; cursor: pointer; transition: all 0.3s;"
+                onmouseover="this.style.background='#388e3c'"
+                onmouseout="this.style.background='#4caf50'">
+            Download CSV 📄
+        </button>
+    </div>
+</div>
+{% endif %}
+
+<script>
+function exportTableToCSV() {
+    // Get outlier data from the table
+    const table = document.querySelector('table');
+    let csv = [];
+    
+    // Get headers
+    const headers = [];
+    table.querySelectorAll('thead th').forEach(th => {
+        headers.push(th.textContent.trim());
+    });
+    csv.push(headers.join(','));
+    
+    // Get data rows
+    table.querySelectorAll('tbody tr').forEach(tr => {
+        const row = [];
+        tr.querySelectorAll('td').forEach(td => {
+            // Escape commas and quotes in the data
+            let text = td.textContent.trim();
+            if (text.includes(',') || text.includes('"')) {
+                text = '"' + text.replace(/"/g, '""') + '"';
+            }
+            row.push(text);
+        });
+        csv.push(row.join(','));
+    });
+    
+    // Create download
+    const csvContent = csv.join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    
+    link.setAttribute('href', url);
+    link.setAttribute('download', 'outliers_{{ source_station }}_' + new Date().toISOString().split('T')[0] + '.csv');
+    link.style.visibility = 'hidden';
+    
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+}
+</script>
+
+{% endblock %}
