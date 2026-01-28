@@ -132,7 +132,7 @@
                     <td style="padding: 10px;">{{ outlier.received_time }}</td>
                     <td style="padding: 10px; font-weight: 600; color: #1f3a5f;">{{ outlier.sttn_from }}</td>
                     <td style="padding: 10px; font-weight: 600; color: #1f3a5f;">{{ outlier.sttn_to }}</td>
-                    <td style="padding: 10px;">{{ outlier.cmdt }}</td>
+                    <td style="padding: 10px;">{{ outlier.commodity }}</td>
                     <td style="padding: 10px;">{{ outlier.rake_type }}</td>
                     <td style="padding: 10px; text-align: right; font-weight: bold; color: #d32f2f; font-size: 1.1em;">
                         {{ outlier.transit_time_hrs }}
@@ -173,7 +173,7 @@
                 <li style="color: #388e3c;"><strong>Normal Operation:</strong> {{ "%.1f"|format(outlier_percentage) }}% outliers indicates good consistency in transit times.</li>
                 {% endif %}
                 <li>Outliers are identified using the IQR statistical method (Q1 - 1.5×IQR to Q3 + 1.5×IQR)</li>
-                <li>These records may indicate delays, route issues, or data quality problems requiring investigation</li>
+                <!-- <li>These records may indicate delays, route issues, or data quality problems requiring investigation</li> -->
             </ul>
         </div>
     </div>

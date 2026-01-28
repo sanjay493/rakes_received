@@ -98,7 +98,7 @@
                     <td style="padding: 12px; color: #333;">{{ outlier.received_time }}</td>
                     <td style="padding: 12px; font-weight: 700; color: #1f3a5f;">{{ outlier.sttn_from }}</td>
                     <td style="padding: 12px; font-weight: 700; color: #1f3a5f;">{{ outlier.sttn_to }}</td>
-                    <td style="padding: 12px; color: #333;">{{ outlier.cmdt }}</td>
+                    <td style="padding: 12px; color: #333;">{{ outlier.commodity }}</td>
                     <td style="padding: 12px; color: #555;">{{ outlier.rake_type }}</td>
                     <td style="padding: 12px; text-align: right; font-weight: bold; color: #d32f2f; font-size: 1.15em;">
                         {{ outlier.transit_time_hrs }}
@@ -121,13 +121,13 @@
         <div style="margin-top: 10px; padding: 12px; {% if outlier_percentage > 20 %}background: #ffebee;{% elif outlier_percentage > 10 %}background: #fff3e0;{% elif outlier_percentage > 5 %}background: #fffde7;{% else %}background: #e8f5e9;{% endif %} border-radius: 6px;">
             {% if outlier_percentage > 20 %}
             <div style="color: #d32f2f; font-weight: bold; margin-bottom: 8px;">🚨 HIGH ALERT</div>
-            <p style="color: #666; margin: 0;">{{ "%.1f"|format(outlier_percentage) }}% outliers indicates significant transit time variability. This requires immediate investigation and corrective action.</p>
+            <p style="color: #666; margin: 0;">{{ "%.1f"|format(outlier_percentage) }}% outliers indicates significant transit time variability</p>
             {% elif outlier_percentage > 10 %}
             <div style="color: #f57c00; font-weight: bold; margin-bottom: 8px;">⚠️ MODERATE CONCERN</div>
-            <p style="color: #666; margin: 0;">{{ "%.1f"|format(outlier_percentage) }}% outliers suggests notable variations in transit times. Review these records for patterns and consider process improvements.</p>
+            <p style="color: #666; margin: 0;">{{ "%.1f"|format(outlier_percentage) }}% outliers suggests notable variations in transit times. </p>
             {% elif outlier_percentage > 5 %}
             <div style="color: #fbc02d; font-weight: bold; margin-bottom: 8px;">👀 WORTH MONITORING</div>
-            <p style="color: #666; margin: 0;">{{ "%.1f"|format(outlier_percentage) }}% outliers is within acceptable range, but continue monitoring trends over time to prevent deterioration.</p>
+            <p style="color: #666; margin: 0;">{{ "%.1f"|format(outlier_percentage) }}% outliers is within acceptable range</p>
             {% else %}
             <div style="color: #388e3c; font-weight: bold; margin-bottom: 8px;">✅ NORMAL OPERATION</div>
             <p style="color: #666; margin: 0;">{{ "%.1f"|format(outlier_percentage) }}% outliers indicates good consistency in transit times. Current operations are performing well.</p>
@@ -140,9 +140,9 @@
         <ul style="margin: 10px 0 0 20px; color: #666; line-height: 1.8;">
             <li><strong>Method:</strong> Interquartile Range (IQR) statistical method</li>
             <li><strong>Detection Range:</strong> Values outside Q1 - 1.5×IQR to Q3 + 1.5×IQR</li>
-            <li><strong>Interpretation:</strong> These are statistically anomalous transit times that warrant investigation</li>
+            <!-- <li><strong>Interpretation:</strong> These are statistically anomalous transit times that warrant investigation</li>
             <li><strong>Possible Causes:</strong> Route delays, weather conditions, operational issues, equipment problems, or data quality issues</li>
-            <li><strong>Action Items:</strong> Review identified records, investigate root causes, implement corrective measures</li>
+            <li><strong>Action Items:</strong> Review identified records, investigate root causes, implement corrective measures</li> -->
         </ul>
     </div>
 </div>

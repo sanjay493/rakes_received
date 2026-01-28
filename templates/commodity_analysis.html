@@ -43,6 +43,7 @@
                 <span>{{ commodity }}</span>
                 <span style="font-size: 0.9em; opacity: 0.9;">→</span>
                 <span style="background: rgba(255,255,255,0.2); padding: 4px 12px; border-radius: 6px;">{{ destination }}</span>
+                <span style="margin-left: auto; font-size: 0.8em; opacity: 0.8;"> Avg Transit Time in Hrs | Rakes Count</span>
             </h3>
         </div>
 
@@ -252,7 +253,7 @@
             </table>
         </div>
 
-        <div style="margin-top: 15px; padding: 12px; background: #fff8e1; border-left: 4px solid #ffa000; border-radius: 4px; font-size: 12px;">
+        <!-- <div style="margin-top: 15px; padding: 12px; background: #fff8e1; border-left: 4px solid #ffa000; border-radius: 4px; font-size: 12px;">
             <strong style="color: #f57f17;">📌 How to Read the Table:</strong>
             <ul style="margin: 8px 0 0 20px; color: #666; line-height: 1.6;">
                 <li><strong>Transit Time:</strong> Displayed at the top of each cell in hours (e.g., 45.2 hrs)</li>
@@ -263,7 +264,7 @@
                 <li>Hover over the circular badges in "Best" columns for additional context</li>
                 <li>These "best" values represent peak performance benchmarks that can be targeted for improvement</li>
             </ul>
-        </div>
+        </div> -->
     </div>
     {% endfor %}
 {% else %}
@@ -275,12 +276,12 @@
 {% endif %}
 
 <!-- Legend -->
-<div class="card" style="margin-top: 20px; background: #f8f9fa; border: 2px solid #dee2e6;">
+<!-- <div class="card" style="margin-top: 20px; background: #f8f9fa; border: 2px solid #dee2e6;">
     <h3 style="color: #1f3a5f; margin-bottom: 15px;">📖 Understanding the Dashboard</h3>
     
     <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 15px;">
         <div style="padding: 12px; background: white; border-radius: 6px; border-left: 4px solid #0277bd;">
-            <strong style="color: #0277bd;">Recent Performance (4 Months/8 Weeks/4 Days)</strong>
+            <strong style="color: #0277bd;">Recent Performance (4 Months/4 Weeks/4 Days)</strong>
             <p style="font-size: 13px; color: #666; margin: 5px 0 0 0;">Shows average transit times and rake counts for recent periods to track current operational performance.</p>
         </div>
         
@@ -305,7 +306,7 @@
             <li>Hover over count values in "Best" columns to see sample sizes</li>
         </ol>
     </div>
-</div>
+</div> -->
 
 <style>
     /* Sticky header enhancement */

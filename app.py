@@ -36,6 +36,7 @@ class Rake(Base):
     sttn_to = Column(String, index=True)
 
     cmdt = Column(String, index=True)
+    commodity = Column(String)
     rake_type = Column(String, index=True)
 
     totl_unts = Column(Integer)
@@ -105,6 +106,11 @@ COMMODITY_MAPPINGS_FILE = "commodity_mappings.txt"
 station_mappings = load_mappings(STATION_MAPPINGS_FILE)
 commodity_mappings = load_mappings(COMMODITY_MAPPINGS_FILE)
 
+def get_station_display_name(station_code):
+    if not station_code:
+        return station_code
+    return station_mappings.get(station_code, station_code)
+
 # ------------------ CLEANING ------------------
 
 def clean_data(df):
@@ -143,19 +149,20 @@ def clean_data(df):
     # Units cleanup
     df["totl_unts"] = df["totl_unts"].astype(str).str.split(r"\+").str[0]
     df["totl_unts"] = pd.to_numeric(df["totl_unts"], errors="coerce")
-    # Station normalization from configuration file
-    if station_mappings:
-        df["sttn_from"] = df["sttn_from"].replace(station_mappings)
+   
 
     # Commodity normalization from configuration file
     if commodity_mappings:
-        df["cmdt"] = df["cmdt"].replace(commodity_mappings)
+        df["commodity"] = df["cmdt"].replace(commodity_mappings)
 
     # ------------------ PATCHED sttn_to LOGIC ------------------
 
     # Keep only valid destinations
     valid_destinations = ["BSCS","BSPC","DSEY","IISD","BCME","HSPG","NHSB"]
     df = df[df["sttn_to"].isin(valid_destinations)]
+
+    clean_sttn_from = ["BNDM","DSPY"]
+    df = df[~df["sttn_from"].isin(clean_sttn_from)]
 
     # Standardize destination codes
     df["sttn_to"] = df["sttn_to"].replace({
@@ -194,6 +201,7 @@ def insert_cleaned_data(df):
                 "sttn_from": row["sttn_from"],
                 "sttn_to": row["sttn_to"],
                 "cmdt": row["cmdt"],
+                "commodity": row["commodity"],
                 "rake_type": row["rake_type"],
                 "totl_unts": row["totl_unts"],
             }
@@ -247,16 +255,32 @@ def fallback_insert(session, records):
 
 # ------------------ ANALYTICS ------------------
 
+# def query_to_df(rows):
+#     return pd.DataFrame([{
+#         "received_time": r.received_time,
+#         "transit_time_hrs": r.transit_time_hrs,
+#         "sttn_from": r.sttn_from,
+#         "sttn_to": r.sttn_to,
+#         "commodity": r.commodity,
+#         "rake_type": r.rake_type
+#     } for r in rows])
+
 def query_to_df(rows):
-    return pd.DataFrame([{
+    df = pd.DataFrame([{
         "received_time": r.received_time,
         "transit_time_hrs": r.transit_time_hrs,
         "sttn_from": r.sttn_from,
         "sttn_to": r.sttn_to,
-        "cmdt": r.cmdt,
+        "commodity": r.commodity,
         "rake_type": r.rake_type
     } for r in rows])
 
+    # map codes → readable names once
+    df["sttn_from"] = df["sttn_from"].apply(get_station_display_name)
+    # df["sttn_to"]   = df["sttn_to"].apply(get_station_display_name)
+    # df["commodity"] = df["commodity"].apply(get_commodity_display_name)
+
+    return df
 # ------------------ NEW: API ENDPOINTS FOR DYNAMIC FILTERS ------------------
 
 @app.route("/api/get_filters", methods=["POST"])
@@ -280,7 +304,7 @@ def get_filters():
         filtered_sources = query
     
     if commodity and commodity != "All Commodities":
-        filtered_commodities = query.filter(Rake.cmdt == commodity)
+        filtered_commodities = query.filter(Rake.commodity == commodity)
     else:
         filtered_commodities = query
     
@@ -293,7 +317,7 @@ def get_filters():
     # For sources: filter by commodity and rake_type
     sources_query = query
     if commodity and commodity != "All Commodities":
-        sources_query = sources_query.filter(Rake.cmdt == commodity)
+        sources_query = sources_query.filter(Rake.commodity == commodity)
     if rake_type and rake_type != "All Rake Types":
         sources_query = sources_query.filter(Rake.rake_type == rake_type)
     sources = sorted({x[0] for x in sources_query.with_entities(Rake.sttn_from).distinct()})
@@ -304,14 +328,14 @@ def get_filters():
         commodities_query = commodities_query.filter(Rake.sttn_from == source)
     if rake_type and rake_type != "All Rake Types":
         commodities_query = commodities_query.filter(Rake.rake_type == rake_type)
-    commodities = sorted({x[0] for x in commodities_query.with_entities(Rake.cmdt).distinct()})
+    commodities = sorted({x[0] for x in commodities_query.with_entities(Rake.commodity).distinct()})
     
     # For rake_types: filter by source and commodity
     rake_types_query = query
     if source and source != "All Sources":
         rake_types_query = rake_types_query.filter(Rake.sttn_from == source)
     if commodity and commodity != "All Commodities":
-        rake_types_query = rake_types_query.filter(Rake.cmdt == commodity)
+        rake_types_query = rake_types_query.filter(Rake.commodity == commodity)
     rake_types = sorted({x[0] for x in rake_types_query.with_entities(Rake.rake_type).distinct()})
     
     session_db.close()
@@ -321,6 +345,8 @@ def get_filters():
         'commodities': commodities,
         'rake_types': rake_types
     })
+
+
 
 # ------------------ ROUTES ------------------
 
@@ -372,7 +398,7 @@ def dashboard():
         # Get all available options for this destination
         base_query = session_db.query(Rake).filter(Rake.sttn_to == selected_unit)
         sttn_froms = sorted({x[0] for x in base_query.with_entities(Rake.sttn_from).distinct()})
-        commodities = sorted({x[0] for x in base_query.with_entities(Rake.cmdt).distinct()})
+        commodities = sorted({x[0] for x in base_query.with_entities(Rake.commodity).distinct()})
         rake_types = sorted({x[0] for x in base_query.with_entities(Rake.rake_type).distinct()})
     else:
         sttn_froms = []
@@ -399,7 +425,7 @@ def dashboard():
         if sttn_from:
             query = query.filter(Rake.sttn_from == sttn_from)
         if commodity:
-            query = query.filter(Rake.cmdt == commodity)
+            query = query.filter(Rake.commodity == commodity)
         if rake_type:
             query = query.filter(Rake.rake_type == rake_type)
         
@@ -785,7 +811,7 @@ def commodity_analysis():
     selected_destination = request.args.get("destination", "")
     
     # Get all unique values for filters
-    commodities = [r[0] for r in session_db.query(Rake.cmdt).distinct().all() if r[0]]
+    commodities = [r[0] for r in session_db.query(Rake.commodity).distinct().all() if r[0]]
     destinations = [r[0] for r in session_db.query(Rake.sttn_to).distinct().all() if r[0]]
     
     # Build base query
@@ -793,7 +819,7 @@ def commodity_analysis():
     
     # Apply filters if selected
     if selected_commodity:
-        query = query.filter(Rake.cmdt == selected_commodity)
+        query = query.filter(Rake.commodity == selected_commodity)
     if selected_destination:
         query = query.filter(Rake.sttn_to == selected_destination)
     
@@ -866,7 +892,7 @@ def commodity_analysis():
             header_days.append(day.strftime('%d-%b'))
         
         # Group by commodity, destination, and source
-        grouped = df.groupby(['cmdt', 'sttn_to', 'sttn_from'])
+        grouped = df.groupby(['commodity', 'sttn_to', 'sttn_from'])
         
         for (commodity, destination, source), group_df in grouped:
             # Use the same date ranges as calculated for headers
@@ -1084,7 +1110,7 @@ def source_outliers(source_station):
     )
     
     if commodity:
-        query = query.filter(Rake.cmdt == commodity)
+        query = query.filter(Rake.commodity == commodity)
     if destination:
         query = query.filter(Rake.sttn_to == destination)
     
@@ -1140,7 +1166,7 @@ def export_csv():
     if sttn_from:
         query = query.filter(Rake.sttn_from == sttn_from)
     if commodity:
-        query = query.filter(Rake.cmdt == commodity)
+        query = query.filter(Rake.commodity == commodity)
     if rake_type:
         query = query.filter(Rake.rake_type == rake_type)
     
