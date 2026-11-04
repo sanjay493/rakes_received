@@ -219,11 +219,7 @@ DESTINATION_PLANTS = {
 
 # ------------------ DISTANCE ESTIMATE ------------------
 
-# (from km, up to km); None means no upper limit. Edit these to change the slabs.
-DISTANCE_SLABS = [
-    (0, 50), (50, 100), (100, 200), (200, 300), (300, 500),
-    (500, 750), (750, 1000), (1000, None),
-]
+SLAB_KM = 50  # Width of each distance slab
 UNKNOWN_SLAB = "Unknown"
 
 def load_station_locations():
@@ -259,17 +255,13 @@ def distance_left_km(from_code, to_code):
     a = math.sin((lat2 - lat1) / 2) ** 2 + math.cos(lat1) * math.cos(lat2) * math.sin((lon2 - lon1) / 2) ** 2
     return round(2 * 6371 * math.asin(math.sqrt(a)))
 
-def slab_label(km):
-    """The distance slab for a number of km. A value on a boundary goes in the higher slab."""
-    if km is None:
-        return UNKNOWN_SLAB
-    for low, high in DISTANCE_SLABS:
-        if high is None or km < high:
-            if km >= low:
-                return f"{low}+ km" if high is None else f"{low}-{high} km"
-    return UNKNOWN_SLAB
+def slab_start(km):
+    """Where a distance's slab starts, so 50 km is in the slab starting at 50.
+    Unknown distances sort after every slab."""
+    return math.inf if km is None else km // SLAB_KM * SLAB_KM
 
-SLAB_ORDER = [slab_label(low) for low, _ in DISTANCE_SLABS] + [UNKNOWN_SLAB]
+def slab_label(start):
+    return UNKNOWN_SLAB if start == math.inf else f"{start}-{start + SLAB_KM} km"
 
 def commodity_plant_report(rakes):
     """Count rakes by commodity, distance slab and plant, largest commodity first.
@@ -282,7 +274,7 @@ def commodity_plant_report(rakes):
             elsewhere += 1
             continue
         slabs = counts.setdefault(rake.cmdt or "—", {})
-        plants = slabs.setdefault(slab_label(rake.distance_km), dict.fromkeys(PLANTS, 0))
+        plants = slabs.setdefault(slab_start(rake.distance_km), dict.fromkeys(PLANTS, 0))
         plants[plant] += 1
 
     def totals(rows):
@@ -294,8 +286,9 @@ def commodity_plant_report(rakes):
         report.append({
             "commodity": commodity,
             "slabs": [
-                {"label": label, "plants": slabs[label], "total": sum(slabs[label].values())}
-                for label in SLAB_ORDER if label in slabs
+                # Only slabs with rakes are in the dict, so empty ones never appear.
+                {"label": slab_label(start), "plants": slabs[start], "total": sum(slabs[start].values())}
+                for start in sorted(slabs)
             ],
             "plant_totals": plant_totals,
             "total": sum(plant_totals.values()),
