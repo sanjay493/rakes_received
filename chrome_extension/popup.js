@@ -1,4 +1,7 @@
-const API_URL = "https://rakes-received.fly.dev/api/rakes";
+const REPORTS = {
+  received: { label: "Rakes Received", url: "https://rakes-received.fly.dev/api/rakes" },
+  inbound: { label: "Loaded In-Bound", url: "https://rakes-received.fly.dev/api/inbound" },
+};
 
 const statusEl = document.getElementById("status");
 const tokenEl = document.getElementById("token");
@@ -30,7 +33,7 @@ async function findTable() {
   }
 
   if (table && table.rows.length) {
-    showStatus(`Found ${table.rows.length} rows on this page.`);
+    showStatus(`Found ${table.rows.length} ${REPORTS[table.report].label} rows on this page.`);
     return;
   }
 
@@ -39,7 +42,7 @@ async function findTable() {
   const headings = results.flatMap((result) => result.headings).slice(0, 3).join(" | ");
   showStatus(
     `No rake table found (checked ${tableCount} tables). ` +
-      "Open the report on FOIS first." +
+      "Open the Rakes Received or Loaded In-Bound report on FOIS first." +
       (headings ? ` Headings seen: ${headings}` : ""),
     "error",
   );
@@ -53,7 +56,7 @@ async function send() {
   await chrome.storage.local.set({ apiToken: token });
 
   try {
-    const response = await fetch(API_URL, {
+    const response = await fetch(REPORTS[table.report].url, {
       method: "POST",
       // Without this, a 401 from the site's login makes Chrome show a password box.
       credentials: "omit",
@@ -66,6 +69,8 @@ async function send() {
       showStatus("The server rejected the API token.", "error");
     } else if (!response.ok) {
       showStatus(result.error || `Server error (${response.status}).`, "error");
+    } else if (table.report === "inbound") {
+      showStatus(`Sent ${result.inserted} rakes. This is now the latest In-Bound list.`, "success");
     } else {
       const unusable = result.received - result.inserted - result.skipped;
       showStatus(

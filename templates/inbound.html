@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="card">
+    <h2 style="margin-top: 0;">Loaded In-Bound Rakes</h2>
+    {% if imported_at %}
+    <p style="margin-bottom: 0;">
+        {{ total }} rakes in the list sent from FOIS on {{ imported_at.strftime('%d-%m-%Y %H:%M') }} IST.
+    </p>
+    <div class="unit-buttons">
+        <a class="unit-btn {% if not destination %}active{% endif %}" href="{{ url_for('inbound') }}">All ({{ total }})</a>
+        {% for sttn_to, count in counts %}
+        <a class="unit-btn {% if destination == sttn_to %}active{% endif %}" href="{{ url_for('inbound', sttn_to=sttn_to) }}">{{ sttn_to or '—' }} ({{ count }})</a>
+        {% endfor %}
+    </div>
+    {% else %}
+    <p style="margin-bottom: 0;">
+        No list has been received yet. Open the Loaded In-Bound report on FOIS and send it with the Chrome extension.
+    </p>
+    {% endif %}
+</div>
+
+{% if rakes %}
+<div class="card" style="overflow-x: auto;">
+    <table style="width: 100%; border-collapse: collapse; font-size: 13px; white-space: nowrap;">
+        <thead>
+            <tr style="background: #1f3a5f; color: white; text-align: left;">
+                <th style="padding: 8px;">Rake ID</th>
+                <th style="padding: 8px;">Load Name</th>
+                <th style="padding: 8px;">From</th>
+                <th style="padding: 8px;">To</th>
+                <th style="padding: 8px;">Cmdt</th>
+                <th style="padding: 8px;">Units</th>
+                <th style="padding: 8px;">Current Location</th>
+                <th style="padding: 8px;">Status</th>
+                <th style="padding: 8px;">Status Time</th>
+                <th style="padding: 8px;">Dept Time</th>
+                <th style="padding: 8px;">Transit Time</th>
+                <th style="padding: 8px;">Expected Arrival</th>
+                <th style="padding: 8px;">Loco No.</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for rake in rakes %}
+            <tr style="border-bottom: 1px solid #e4e7eb;">
+                <td style="padding: 8px;">{{ rake.rake_id or '' }}</td>
+                <td style="padding: 8px;">{{ rake.load_name or '' }}</td>
+                <td style="padding: 8px;">{{ rake.sttn_from or '' }}</td>
+                <td style="padding: 8px;">{{ rake.sttn_to or '' }}</td>
+                <td style="padding: 8px;">{{ rake.cmdt or '' }}</td>
+                <td style="padding: 8px;">{{ rake.totl_unts or '' }}</td>
+                <td style="padding: 8px;">{{ rake.crnt_locn or '' }}</td>
+                <td style="padding: 8px;">{{ rake.stts_code or '' }}</td>
+                <td style="padding: 8px;">{{ rake.stts_time or '' }}</td>
+                <td style="padding: 8px;">{{ rake.dept_time or '' }}</td>
+                <td style="padding: 8px;">{{ rake.transit_time or '' }}</td>
+                <td style="padding: 8px;">{{ rake.expd_arvl_time or '' }}</td>
+                <td style="padding: 8px;">{{ rake.loco_no or '' }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+
+{% endblock %}

@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Rakes Received Exporter",
-  "version": "1.0.0",
-  "description": "Sends the rake table on the open page to the Rakes Received dashboard when you click Send.",
+  "version": "1.1.0",
+  "description": "Sends the Rakes Received or Loaded In-Bound table on the open page to the Rakes Received dashboard when you click Send.",
   "permissions": ["activeTab", "scripting", "storage"],
   "host_permissions": ["https://rakes-received.fly.dev/*"],
   "action": {

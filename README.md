@@ -58,6 +58,15 @@ To use it:
 2. Click the extension icon. It shows how many rows it found.
 3. Enter the API token (it's remembered after the first send) and click **Send to dashboard**.
 
-The extension runs only when its icon is clicked, reads only tables on the open page, and never sees FOIS passwords. Rows already on the dashboard are skipped, so sending the same report twice is safe. A report split across pages needs one send per page.
+The extension runs only when its icon is clicked, reads only tables on the open page, and never sees FOIS passwords.
 
-The table needs these headings: `Sr No`, `Received Time`, `Dispatched Time`, `Transit Time`, `Sttn From`, `Sttn To`, `Cmdt`, `Totl Unts` and `Rake Type`, the same ones CSV upload requires. If the site moves to another address, update `API_URL` in `popup.js` and `host_permissions` in `manifest.json`.
+It recognises two reports by their headings:
+
+| Report | Required headings | What happens on send |
+| --- | --- | --- |
+| Rakes Received | `Sr No`, `Received Time`, `Dispatched Time`, `Transit Time`, `Sttn From`, `Sttn To`, `Cmdt`, `Totl Unts`, `Rake Type` | Rows are added to the dashboard. Rows already there are skipped, so sending twice is safe. |
+| Loaded In-Bound | `Crnt Locn`, `Stts Time`, `Sttn From`, `Sttn To`, `Rake Id`, `Expd Arvltime` | The rows become the latest list on the `/inbound` page. Older lists stay in the database but aren't shown. |
+
+Select **Show All** before sending, because the extension only reads rows that are on the page. A Loaded In-Bound report that's filtered or only partly shown becomes the whole latest list, so send the complete report.
+
+If the site moves to another address, update `REPORTS` in `popup.js` and `host_permissions` in `manifest.json`.

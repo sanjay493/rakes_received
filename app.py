@@ -1,9 +1,10 @@
 from flask import Flask, Response, render_template, request, redirect, send_file, jsonify
 import pandas as pd
 import plotly.graph_objs as go
-import hmac, os, io, shutil
+import hmac, os, io, re, shutil
+from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import create_engine, text, Column, Integer, String, Float, DateTime, UniqueConstraint
+from sqlalchemy import create_engine, func, text, Column, Integer, String, Float, DateTime, UniqueConstraint
 from sqlalchemy.engine import URL
 from sqlalchemy.orm import declarative_base
 from sqlalchemy.orm import sessionmaker
@@ -44,8 +45,8 @@ if os.environ.get("REQUIRE_AUTH") == "1" and not APP_PASSWORD:
 
 @app.before_request
 def require_login():
-    # import_rakes checks API_TOKEN itself.
-    if not APP_PASSWORD or request.endpoint in ("healthz", "import_rakes"):
+    # The import endpoints check API_TOKEN themselves.
+    if not APP_PASSWORD or request.endpoint in ("healthz", "import_rakes", "import_inbound"):
         return None
 
     auth = request.authorization
@@ -88,6 +89,52 @@ class Rake(Base):
     __table_args__ = (
         UniqueConstraint("received_time", "sttn_from", "sttn_to","cmdt","rake_type","dispatched_time", name="uq_rake_time_to_from_cmdt_type"),
     )
+
+class InboundRake(Base):
+    """One row of a FOIS Loaded In-Bound report. Each import adds a new list; times stay as FOIS shows them."""
+    __tablename__ = "inbound_rakes"
+
+    id = Column(Integer, primary_key=True)
+    imported_at = Column(DateTime, index=True, nullable=False)
+
+    crnt_zone = Column(String)
+    crnt_dvsn = Column(String)
+    crnt_locn = Column(String)
+    stts_code = Column(String)
+    stts_time = Column(String)
+    sttn_from = Column(String)
+    sttn_to = Column(String, index=True)
+    line_no = Column(String)
+    cc = Column(String)
+    load_name = Column(String)
+    rake_id = Column(String)
+    load_type = Column(String)
+    totl_unts = Column(String)
+    eight_w = Column(String)
+    loaded_empty = Column(String)
+    cmdt = Column(String)
+    cnsr = Column(String)
+    cnsg = Column(String)
+    ldng_time = Column(String)
+    dept_time = Column(String)
+    transit_time = Column(String)
+    loco_no = Column(String)
+    loco_type = Column(String)
+    expd_arvl_time = Column(String)
+
+# FOIS heading (lower case, without spaces, dots or underscores) -> InboundRake column
+INBOUND_HEADINGS = {
+    "crntzone": "crnt_zone", "crntdvsn": "crnt_dvsn", "crntlocn": "crnt_locn",
+    "sttscode": "stts_code", "sttstime": "stts_time", "sttnfrom": "sttn_from",
+    "sttnto": "sttn_to", "lineno": "line_no", "cc": "cc", "loadname": "load_name",
+    "rakeid": "rake_id", "loadtype": "load_type", "totlunts": "totl_unts",
+    "8w": "eight_w", "l/e": "loaded_empty", "cmdt": "cmdt", "cnsr": "cnsr",
+    "cnsg": "cnsg", "ldngtime": "ldng_time", "depttime": "dept_time",
+    "transittime": "transit_time", "locono": "loco_no", "locotype": "loco_type",
+    "expdarvltime": "expd_arvl_time",
+}
+
+IST = timezone(timedelta(hours=5, minutes=30))
 
 engine = create_engine(URL.create("sqlite", database=data_path("rake_data.db")))
 Base.metadata.create_all(engine)
@@ -329,17 +376,25 @@ def query_to_df(rows):
     return df
 # ------------------ CHROME EXTENSION IMPORT ------------------
 
-@app.route("/api/rakes", methods=["POST"])
-def import_rakes():
-    """Import a rake table sent as JSON: {"columns": [...], "rows": [[...], ...]}"""
+def read_import_request():
+    """Check the API token and read {"columns": [...], "rows": [[...], ...]} from the request.
+    Returns (data, None), or (None, error response)."""
     auth = request.authorization
     token = auth.token if auth and auth.type == "bearer" else None
     if not API_TOKEN or not token or not hmac.compare_digest(token.encode(), API_TOKEN.encode()):
-        return jsonify(error="Invalid or missing API token"), 401
+        return None, (jsonify(error="Invalid or missing API token"), 401)
 
     data = request.get_json(silent=True)
     if not isinstance(data, dict) or not data.get("columns") or not data.get("rows"):
-        return jsonify(error="Expected JSON with columns and rows"), 400
+        return None, (jsonify(error="Expected JSON with columns and rows"), 400)
+    return data, None
+
+@app.route("/api/rakes", methods=["POST"])
+def import_rakes():
+    """Import a Rakes Received table."""
+    data, error = read_import_request()
+    if error:
+        return error
 
     try:
         df_raw = pd.DataFrame(data["rows"], columns=data["columns"])
@@ -349,6 +404,40 @@ def import_rakes():
 
     inserted, skipped = insert_cleaned_data(df_clean)
     return jsonify(received=len(df_raw), inserted=inserted, skipped=skipped)
+
+@app.route("/api/inbound", methods=["POST"])
+def import_inbound():
+    """Save a Loaded In-Bound table as the latest list of rakes on the way."""
+    data, error = read_import_request()
+    if error:
+        return error
+
+    columns = data["columns"]
+    rows = data["rows"]
+    if not isinstance(columns, list) or not isinstance(rows, list):
+        return jsonify(error="Expected JSON with columns and rows"), 400
+
+    fields = [INBOUND_HEADINGS.get(re.sub(r"[\s._]", "", str(c).lower())) for c in columns]
+    if "rake_id" not in fields or "sttn_to" not in fields:
+        return jsonify(error="Could not read the table: RAKE ID and STTN TO are required"), 400
+
+    imported_at = datetime.now(IST).replace(tzinfo=None)
+    records = [
+        InboundRake(imported_at=imported_at, **{f: v for f, v in zip(fields, row) if f})
+        for row in rows
+        if isinstance(row, list) and len(row) == len(columns)
+    ]
+    if not records:
+        return jsonify(error="The table has no usable rows"), 400
+
+    session = SessionDB()
+    try:
+        session.add_all(records)
+        session.commit()
+    finally:
+        session.close()
+
+    return jsonify(received=len(rows), inserted=len(records))
 
 # ------------------ NEW: API ENDPOINTS FOR DYNAMIC FILTERS ------------------
 
@@ -428,6 +517,35 @@ def healthz():
 @app.route("/")
 def index():
     return redirect("/dashboard")
+
+@app.route("/inbound")
+def inbound():
+    """Show the most recently imported Loaded In-Bound list."""
+    destination = request.args.get("sttn_to", "")
+    session = SessionDB()
+    try:
+        imported_at = session.query(func.max(InboundRake.imported_at)).scalar()
+        latest = session.query(InboundRake).filter(InboundRake.imported_at == imported_at)
+        counts = (
+            latest.with_entities(InboundRake.sttn_to, func.count())
+            .group_by(InboundRake.sttn_to)
+            .order_by(InboundRake.sttn_to)
+            .all()
+        )
+        if destination:
+            latest = latest.filter(InboundRake.sttn_to == destination)
+        rakes = latest.order_by(InboundRake.id).all()
+    finally:
+        session.close()
+
+    return render_template(
+        "inbound.html",
+        rakes=rakes,
+        counts=counts,
+        total=sum(count for _, count in counts),
+        destination=destination,
+        imported_at=imported_at,
+    )
 
 @app.route("/upload", methods=["GET", "POST"])
 def upload():
