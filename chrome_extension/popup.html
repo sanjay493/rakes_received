@@ -1,0 +1,29 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Rakes Received Exporter</title>
+  <style>
+    body { width: 300px; margin: 0; padding: 14px; font: 14px system-ui, sans-serif; color: #1f2933; background: #fff; }
+    h1 { margin: 0 0 10px; font-size: 15px; }
+    p { margin: 0 0 10px; overflow-wrap: anywhere; }
+    label { display: block; margin-bottom: 4px; font-weight: 600; }
+    input { box-sizing: border-box; width: 100%; margin-bottom: 10px; padding: 6px; }
+    button { width: 100%; padding: 8px; font: inherit; font-weight: 600; cursor: pointer; }
+    button:disabled { cursor: default; }
+    .error { color: #b42318; }
+    .success { color: #05603a; }
+    .note { margin: 10px 0 0; font-size: 12px; color: #52606d; }
+  </style>
+</head>
+<body>
+  <h1>Send rake table</h1>
+  <p id="status">Looking for a rake table...</p>
+  <label for="token">API token</label>
+  <input id="token" type="password" autocomplete="off">
+  <button id="send" disabled>Send to dashboard</button>
+  <p class="note">Sends only the rake table, to rakes-received.fly.dev, and only when you click Send.</p>
+  <script src="extract.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>

@@ -34,13 +34,18 @@ def data_path(filename):
 APP_USERNAME = os.environ.get("APP_USERNAME", "admin")
 APP_PASSWORD = os.environ.get("APP_PASSWORD")
 
+# Lets the Chrome extension import rake data without the site password.
+# Imports are refused until this is set.
+API_TOKEN = os.environ.get("API_TOKEN")
+
 # The Dockerfile sets REQUIRE_AUTH=1 so a deployment can't go public without a password.
 if os.environ.get("REQUIRE_AUTH") == "1" and not APP_PASSWORD:
     raise RuntimeError("APP_PASSWORD must be set when REQUIRE_AUTH=1")
 
 @app.before_request
 def require_login():
-    if not APP_PASSWORD or request.endpoint == "healthz":
+    # import_rakes checks API_TOKEN itself.
+    if not APP_PASSWORD or request.endpoint in ("healthz", "import_rakes"):
         return None
 
     auth = request.authorization
@@ -322,6 +327,29 @@ def query_to_df(rows):
     # df["commodity"] = df["commodity"].apply(get_commodity_display_name)
 
     return df
+# ------------------ CHROME EXTENSION IMPORT ------------------
+
+@app.route("/api/rakes", methods=["POST"])
+def import_rakes():
+    """Import a rake table sent as JSON: {"columns": [...], "rows": [[...], ...]}"""
+    auth = request.authorization
+    token = auth.token if auth and auth.type == "bearer" else None
+    if not API_TOKEN or not token or not hmac.compare_digest(token.encode(), API_TOKEN.encode()):
+        return jsonify(error="Invalid or missing API token"), 401
+
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict) or not data.get("columns") or not data.get("rows"):
+        return jsonify(error="Expected JSON with columns and rows"), 400
+
+    try:
+        df_raw = pd.DataFrame(data["rows"], columns=data["columns"])
+        df_clean = clean_data(df_raw)
+    except (KeyError, TypeError, ValueError) as e:
+        return jsonify(error=f"Could not read the table: {e}"), 400
+
+    inserted, skipped = insert_cleaned_data(df_clean)
+    return jsonify(received=len(df_raw), inserted=inserted, skipped=skipped)
+
 # ------------------ NEW: API ENDPOINTS FOR DYNAMIC FILTERS ------------------
 
 @app.route("/api/get_filters", methods=["POST"])
