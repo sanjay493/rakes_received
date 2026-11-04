@@ -202,7 +202,29 @@ def get_station_display_name(station_code):
         return station_code
     return station_mappings.get(station_code, station_code)
 
+# ------------------ PLANTS ------------------
+
+PLANTS = ["BSL", "BSP", "DSP", "ISP", "RSP"]
+
+# Destination yard -> plant
+DESTINATION_PLANTS = {
+    "BSCS": "BSL",
+    "BSPC": "BSP",
+    "DSEY": "DSP",
+    "IISD": "ISP",
+    "BCME": "ISP",
+    "HSPG": "RSP",
+    "NHSB": "RSP",
+}
+
 # ------------------ DISTANCE ESTIMATE ------------------
+
+# (from km, up to km); None means no upper limit. Edit these to change the slabs.
+DISTANCE_SLABS = [
+    (0, 50), (50, 100), (100, 200), (200, 300), (300, 500),
+    (500, 750), (750, 1000), (1000, None),
+]
+UNKNOWN_SLAB = "Unknown"
 
 def load_station_locations():
     """Read station coordinates: {code: (lat, lon)}."""
@@ -237,23 +259,56 @@ def distance_left_km(from_code, to_code):
     a = math.sin((lat2 - lat1) / 2) ** 2 + math.cos(lat1) * math.cos(lat2) * math.sin((lon2 - lon1) / 2) ** 2
     return round(2 * 6371 * math.asin(math.sqrt(a)))
 
-def summarise_by_commodity(rakes):
-    """Rake counts and distance figures per commodity, largest count first."""
-    groups = {}
-    for rake in rakes:
-        groups.setdefault(rake.cmdt or "—", []).append(rake.distance_km)
+def slab_label(km):
+    """The distance slab for a number of km. A value on a boundary goes in the higher slab."""
+    if km is None:
+        return UNKNOWN_SLAB
+    for low, high in DISTANCE_SLABS:
+        if high is None or km < high:
+            if km >= low:
+                return f"{low}+ km" if high is None else f"{low}-{high} km"
+    return UNKNOWN_SLAB
 
-    summary = []
-    for commodity, distances in groups.items():
-        known = [d for d in distances if d is not None]
-        summary.append({
+SLAB_ORDER = [slab_label(low) for low, _ in DISTANCE_SLABS] + [UNKNOWN_SLAB]
+
+def commodity_plant_report(rakes):
+    """Count rakes by commodity, distance slab and plant, largest commodity first.
+    Rakes going anywhere other than the plants are left out and only counted."""
+    counts = {}
+    elsewhere = 0
+    for rake in rakes:
+        plant = DESTINATION_PLANTS.get((rake.sttn_to or "").strip().upper())
+        if not plant:
+            elsewhere += 1
+            continue
+        slabs = counts.setdefault(rake.cmdt or "—", {})
+        plants = slabs.setdefault(slab_label(rake.distance_km), dict.fromkeys(PLANTS, 0))
+        plants[plant] += 1
+
+    def totals(rows):
+        return {plant: sum(row[plant] for row in rows) for plant in PLANTS}
+
+    report = []
+    for commodity, slabs in counts.items():
+        plant_totals = totals(slabs.values())
+        report.append({
             "commodity": commodity,
-            "rakes": len(distances),
-            "average_km": round(sum(known) / len(known)) if known else None,
-            "nearest_km": min(known) if known else None,
-            "farthest_km": max(known) if known else None,
+            "slabs": [
+                {"label": label, "plants": slabs[label], "total": sum(slabs[label].values())}
+                for label in SLAB_ORDER if label in slabs
+            ],
+            "plant_totals": plant_totals,
+            "total": sum(plant_totals.values()),
         })
-    return sorted(summary, key=lambda row: (-row["rakes"], row["commodity"]))
+    report.sort(key=lambda row: (-row["total"], row["commodity"]))
+
+    plant_totals = totals([row["plant_totals"] for row in report])
+    return {
+        "rows": report,
+        "plant_totals": plant_totals,
+        "total": sum(plant_totals.values()),
+        "elsewhere": elsewhere,
+    }
 
 # ------------------ CLEANING ------------------
 
@@ -302,22 +357,13 @@ def clean_data(df):
     # ------------------ PATCHED sttn_to LOGIC ------------------
 
     # Keep only valid destinations
-    valid_destinations = ["BSCS","BSPC","DSEY","IISD","BCME","HSPG","NHSB"]
-    df = df[df["sttn_to"].isin(valid_destinations)]
+    df = df[df["sttn_to"].isin(DESTINATION_PLANTS)]
 
     clean_sttn_from = ["BNDM","DSPY"]
     df = df[~df["sttn_from"].isin(clean_sttn_from)]
 
     # Standardize destination codes
-    df["sttn_to"] = df["sttn_to"].replace({
-        "BSCS": "BSL",
-        "BSPC": "BSP",
-        "DSEY": "DSP",
-        "IISD": "ISP",
-        "BCME": "ISP",
-        "HSPG": "RSP",
-        "NHSB": "RSP"
-    })
+    df["sttn_to"] = df["sttn_to"].replace(DESTINATION_PLANTS)
 
     # Drop invalid rows
     df = df.dropna(subset=["received_time", "transit_time_hrs"])
@@ -597,7 +643,8 @@ def inbound():
     return render_template(
         "inbound.html",
         rakes=rakes,
-        commodities=summarise_by_commodity(rakes),
+        report=commodity_plant_report(rakes),
+        plants=PLANTS,
         rakes_with_distance=sum(rake.distance_km is not None for rake in rakes),
         counts=counts,
         total=sum(count for _, count in counts),

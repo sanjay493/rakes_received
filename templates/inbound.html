@@ -22,32 +22,59 @@
 
 {% if rakes %}
 <div class="card" style="overflow-x: auto;">
-    <h3 style="margin-top: 0;">Rakes by Commodity{% if destination %} to {{ destination }}{% endif %}</h3>
+    <h3 style="margin-top: 0;">Rakes by Commodity, Plant and Distance Left{% if destination %} ({{ destination }}){% endif %}</h3>
+    {% if report.rows %}
     <table style="border-collapse: collapse; font-size: 14px; white-space: nowrap;">
         <thead>
             <tr style="background: #1f3a5f; color: white; text-align: left;">
                 <th style="padding: 8px 16px;">Commodity</th>
-                <th style="padding: 8px 16px; text-align: right;">Rakes</th>
-                <th style="padding: 8px 16px; text-align: right;">Average km left</th>
-                <th style="padding: 8px 16px; text-align: right;">Nearest km</th>
-                <th style="padding: 8px 16px; text-align: right;">Farthest km</th>
+                <th style="padding: 8px 16px;">Distance left</th>
+                {% for plant in plants %}
+                <th style="padding: 8px 16px; text-align: right;">{{ plant }}</th>
+                {% endfor %}
+                <th style="padding: 8px 16px; text-align: right;">Total</th>
             </tr>
         </thead>
+        {% for row in report.rows %}
         <tbody>
-            {% for row in commodities %}
+            {% for slab in row.slabs %}
             <tr style="border-bottom: 1px solid #e4e7eb;">
-                <td style="padding: 8px 16px;">{{ row.commodity }}</td>
-                <td style="padding: 8px 16px; text-align: right;">{{ row.rakes }}</td>
-                <td style="padding: 8px 16px; text-align: right;">{{ row.average_km if row.average_km is not none else '—' }}</td>
-                <td style="padding: 8px 16px; text-align: right;">{{ row.nearest_km if row.nearest_km is not none else '—' }}</td>
-                <td style="padding: 8px 16px; text-align: right;">{{ row.farthest_km if row.farthest_km is not none else '—' }}</td>
+                {% if loop.first %}
+                <th scope="rowgroup" rowspan="{{ row.slabs|length + 1 }}" style="padding: 8px 16px; text-align: left; vertical-align: top; border-right: 1px solid #e4e7eb;">{{ row.commodity }}</th>
+                {% endif %}
+                <td style="padding: 8px 16px;">{{ slab.label }}</td>
+                {% for plant in plants %}
+                <td style="padding: 8px 16px; text-align: right;">{{ slab.plants[plant] or '' }}</td>
+                {% endfor %}
+                <td style="padding: 8px 16px; text-align: right;">{{ slab.total }}</td>
             </tr>
             {% endfor %}
+            <tr style="background: #e8eef5; font-weight: bold; border-bottom: 2px solid #1f3a5f;">
+                <td style="padding: 8px 16px;">Total</td>
+                {% for plant in plants %}
+                <td style="padding: 8px 16px; text-align: right;">{{ row.plant_totals[plant] or '' }}</td>
+                {% endfor %}
+                <td style="padding: 8px 16px; text-align: right;">{{ row.total }}</td>
+            </tr>
         </tbody>
+        {% endfor %}
+        <tfoot>
+            <tr style="background: #1f3a5f; color: white; font-weight: bold;">
+                <td style="padding: 8px 16px;" colspan="2">All commodities</td>
+                {% for plant in plants %}
+                <td style="padding: 8px 16px; text-align: right;">{{ report.plant_totals[plant] or '' }}</td>
+                {% endfor %}
+                <td style="padding: 8px 16px; text-align: right;">{{ report.total }}</td>
+            </tr>
+        </tfoot>
     </table>
+    {% else %}
+    <p>No rakes in this list are going to the plants.</p>
+    {% endif %}
     <p style="margin: 12px 0 0; font-size: 13px; color: #52606d;">
         Km left is a straight-line estimate from the current location to the destination, so the rail route will be longer.
-        It's available for {{ rakes_with_distance }} of {{ rakes|length }} rakes; the rest are at locations with no known coordinates.
+        It's available for {{ rakes_with_distance }} of {{ rakes|length }} rakes in the list; "Unknown" means the location has no known coordinates.
+        {% if report.elsewhere %}{{ report.elsewhere }} rakes going to other destinations aren't in this table.{% endif %}
     </p>
 </div>
 
