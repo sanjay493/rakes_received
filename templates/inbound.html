@@ -22,6 +22,36 @@
 
 {% if rakes %}
 <div class="card" style="overflow-x: auto;">
+    <h3 style="margin-top: 0;">Rakes by Commodity{% if destination %} to {{ destination }}{% endif %}</h3>
+    <table style="border-collapse: collapse; font-size: 14px; white-space: nowrap;">
+        <thead>
+            <tr style="background: #1f3a5f; color: white; text-align: left;">
+                <th style="padding: 8px 16px;">Commodity</th>
+                <th style="padding: 8px 16px; text-align: right;">Rakes</th>
+                <th style="padding: 8px 16px; text-align: right;">Average km left</th>
+                <th style="padding: 8px 16px; text-align: right;">Nearest km</th>
+                <th style="padding: 8px 16px; text-align: right;">Farthest km</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in commodities %}
+            <tr style="border-bottom: 1px solid #e4e7eb;">
+                <td style="padding: 8px 16px;">{{ row.commodity }}</td>
+                <td style="padding: 8px 16px; text-align: right;">{{ row.rakes }}</td>
+                <td style="padding: 8px 16px; text-align: right;">{{ row.average_km if row.average_km is not none else '—' }}</td>
+                <td style="padding: 8px 16px; text-align: right;">{{ row.nearest_km if row.nearest_km is not none else '—' }}</td>
+                <td style="padding: 8px 16px; text-align: right;">{{ row.farthest_km if row.farthest_km is not none else '—' }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    <p style="margin: 12px 0 0; font-size: 13px; color: #52606d;">
+        Km left is a straight-line estimate from the current location to the destination, so the rail route will be longer.
+        It's available for {{ rakes_with_distance }} of {{ rakes|length }} rakes; the rest are at locations with no known coordinates.
+    </p>
+</div>
+
+<div class="card" style="overflow-x: auto;">
     <table style="width: 100%; border-collapse: collapse; font-size: 13px; white-space: nowrap;">
         <thead>
             <tr style="background: #1f3a5f; color: white; text-align: left;">
@@ -32,6 +62,7 @@
                 <th style="padding: 8px;">Cmdt</th>
                 <th style="padding: 8px;">Units</th>
                 <th style="padding: 8px;">Current Location</th>
+                <th style="padding: 8px; text-align: right;">Km Left (est.)</th>
                 <th style="padding: 8px;">Status</th>
                 <th style="padding: 8px;">Status Time</th>
                 <th style="padding: 8px;">Dept Time</th>
@@ -50,6 +81,7 @@
                 <td style="padding: 8px;">{{ rake.cmdt or '' }}</td>
                 <td style="padding: 8px;">{{ rake.totl_unts or '' }}</td>
                 <td style="padding: 8px;">{{ rake.crnt_locn or '' }}</td>
+                <td style="padding: 8px; text-align: right;">{{ rake.distance_km if rake.distance_km is not none else '—' }}</td>
                 <td style="padding: 8px;">{{ rake.stts_code or '' }}</td>
                 <td style="padding: 8px;">{{ rake.stts_time or '' }}</td>
                 <td style="padding: 8px;">{{ rake.dept_time or '' }}</td>

@@ -69,4 +69,6 @@ It recognises two reports by their headings:
 
 Select **Show All** before sending, because the extension only reads rows that are on the page. A Loaded In-Bound report that's filtered or only partly shown becomes the whole latest list, so send the complete report.
 
+The `/inbound` page also counts rakes by commodity and estimates the km left for each rake. That's the straight-line distance from `CRNT LOCN` to `STTN TO`, so the rail route is longer. Coordinates come from `station_locations.csv`, built from the CC0 [datameet/railways](https://github.com/datameet/railways) stations data. It doesn't include plant yards, so `YARD_STATIONS` in `app.py` substitutes the nearest city station, and rakes at a location it doesn't know show `—`. To add a missing location, add its code to the CSV.
+
 If the site moves to another address, update `REPORTS` in `popup.js` and `host_permissions` in `manifest.json`.

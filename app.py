@@ -1,7 +1,7 @@
 from flask import Flask, Response, render_template, request, redirect, send_file, jsonify
 import pandas as pd
 import plotly.graph_objs as go
-import hmac, os, io, re, shutil
+import csv, hmac, math, os, io, re, shutil
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import create_engine, func, text, Column, Integer, String, Float, DateTime, UniqueConstraint
@@ -201,6 +201,59 @@ def get_station_display_name(station_code):
     if not station_code:
         return station_code
     return station_mappings.get(station_code, station_code)
+
+# ------------------ DISTANCE ESTIMATE ------------------
+
+def load_station_locations():
+    """Read station coordinates: {code: (lat, lon)}."""
+    with open(os.path.join(BASE_DIR, "station_locations.csv"), newline="") as f:
+        return {row["code"]: (float(row["lat"]), float(row["lon"])) for row in csv.DictReader(f)}
+
+STATION_LOCATIONS = load_station_locations()
+
+# Plant yards aren't in the station data, so use the nearest city station instead.
+YARD_STATIONS = {
+    "BSCS": "BKSC",  # Bokaro
+    "BSPC": "BIA",   # Bhilai
+    "DSEY": "DGR",   # Durgapur
+    "IISD": "ASN",   # Burnpur
+    "BCME": "ASN",   # Burnpur
+    "HSPG": "ROU",   # Rourkela
+    "NHSB": "ROU",   # Rourkela
+}
+
+def station_location(code):
+    code = (code or "").strip().upper()
+    return STATION_LOCATIONS.get(YARD_STATIONS.get(code, code))
+
+def distance_left_km(from_code, to_code):
+    """Straight-line km between two stations, or None if either location is unknown.
+    The rail route is longer, so this is only an estimate."""
+    start, end = station_location(from_code), station_location(to_code)
+    if not start or not end:
+        return None
+
+    lat1, lon1, lat2, lon2 = map(math.radians, (*start, *end))
+    a = math.sin((lat2 - lat1) / 2) ** 2 + math.cos(lat1) * math.cos(lat2) * math.sin((lon2 - lon1) / 2) ** 2
+    return round(2 * 6371 * math.asin(math.sqrt(a)))
+
+def summarise_by_commodity(rakes):
+    """Rake counts and distance figures per commodity, largest count first."""
+    groups = {}
+    for rake in rakes:
+        groups.setdefault(rake.cmdt or "—", []).append(rake.distance_km)
+
+    summary = []
+    for commodity, distances in groups.items():
+        known = [d for d in distances if d is not None]
+        summary.append({
+            "commodity": commodity,
+            "rakes": len(distances),
+            "average_km": round(sum(known) / len(known)) if known else None,
+            "nearest_km": min(known) if known else None,
+            "farthest_km": max(known) if known else None,
+        })
+    return sorted(summary, key=lambda row: (-row["rakes"], row["commodity"]))
 
 # ------------------ CLEANING ------------------
 
@@ -538,9 +591,14 @@ def inbound():
     finally:
         session.close()
 
+    for rake in rakes:
+        rake.distance_km = distance_left_km(rake.crnt_locn, rake.sttn_to)
+
     return render_template(
         "inbound.html",
         rakes=rakes,
+        commodities=summarise_by_commodity(rakes),
+        rakes_with_distance=sum(rake.distance_km is not None for rake in rakes),
         counts=counts,
         total=sum(count for _, count in counts),
         destination=destination,
