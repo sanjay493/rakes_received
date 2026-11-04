@@ -1,9 +1,10 @@
-from flask import Flask, render_template, request, redirect, send_file, jsonify
+from flask import Flask, Response, render_template, request, redirect, send_file, jsonify
 import pandas as pd
 import plotly.graph_objs as go
-import os, io
+import hmac, os, io, shutil
 
-from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, UniqueConstraint
+from sqlalchemy import create_engine, text, Column, Integer, String, Float, DateTime, UniqueConstraint
+from sqlalchemy.engine import URL
 from sqlalchemy.orm import declarative_base
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.dialects.sqlite import insert
@@ -13,8 +14,46 @@ from sqlalchemy.exc import IntegrityError
 
 app = Flask(__name__)
 
-UPLOAD_FOLDER = "uploads"
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+# ------------------ DEPLOYMENT CONFIG ------------------
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# Everything the app writes lives in DATA_DIR. In the cloud, point it at a
+# persistent volume; container filesystems are wiped on every redeploy.
+DATA_DIR = os.path.abspath(os.environ.get("DATA_DIR", BASE_DIR))
+os.makedirs(DATA_DIR, exist_ok=True)
+
+def data_path(filename):
+    """Path to a file in DATA_DIR, seeded from the bundled copy if it isn't there yet."""
+    path = os.path.join(DATA_DIR, filename)
+    bundled = os.path.join(BASE_DIR, filename)
+    if not os.path.exists(path) and os.path.exists(bundled):
+        shutil.copy2(bundled, path)
+    return path
+
+APP_USERNAME = os.environ.get("APP_USERNAME", "admin")
+APP_PASSWORD = os.environ.get("APP_PASSWORD")
+
+# The Dockerfile sets REQUIRE_AUTH=1 so a deployment can't go public without a password.
+if os.environ.get("REQUIRE_AUTH") == "1" and not APP_PASSWORD:
+    raise RuntimeError("APP_PASSWORD must be set when REQUIRE_AUTH=1")
+
+@app.before_request
+def require_login():
+    if not APP_PASSWORD or request.endpoint == "healthz":
+        return None
+
+    auth = request.authorization
+    if auth:
+        username_ok = hmac.compare_digest((auth.username or "").encode(), APP_USERNAME.encode())
+        password_ok = hmac.compare_digest((auth.password or "").encode(), APP_PASSWORD.encode())
+        if username_ok and password_ok:
+            return None
+
+    return Response(
+        "Login required", 401,
+        {"WWW-Authenticate": 'Basic realm="Rake Dashboard", charset="UTF-8"'},
+    )
 
 # ------------------ DATABASE ------------------
 
@@ -45,7 +84,7 @@ class Rake(Base):
         UniqueConstraint("received_time", "sttn_from", "sttn_to","cmdt","rake_type","dispatched_time", name="uq_rake_time_to_from_cmdt_type"),
     )
 
-engine = create_engine("sqlite:///rake_data.db")
+engine = create_engine(URL.create("sqlite", database=data_path("rake_data.db")))
 Base.metadata.create_all(engine)
 SessionDB = sessionmaker(bind=engine)
 
@@ -100,8 +139,8 @@ def save_mappings(filepath, mappings):
         return False
 
 # Load configuration files
-STATION_MAPPINGS_FILE = "station_mappings.txt"
-COMMODITY_MAPPINGS_FILE = "commodity_mappings.txt"
+STATION_MAPPINGS_FILE = data_path("station_mappings.txt")
+COMMODITY_MAPPINGS_FILE = data_path("commodity_mappings.txt")
 
 station_mappings = load_mappings(STATION_MAPPINGS_FILE)
 commodity_mappings = load_mappings(COMMODITY_MAPPINGS_FILE)
@@ -177,7 +216,7 @@ def clean_data(df):
 
     # Drop invalid rows
     df = df.dropna(subset=["received_time", "transit_time_hrs"])
-    df.to_csv("cleaned_data_debug.csv", index=False)  # Debugging line
+    df.to_csv(os.path.join(DATA_DIR, "cleaned_data_debug.csv"), index=False)  # Debugging line
 
     return df
 
@@ -266,6 +305,8 @@ def fallback_insert(session, records):
 #     } for r in rows])
 
 def query_to_df(rows):
+    # Explicit columns so an empty result (no rakes in the date range) still has them.
+    columns = ["received_time", "transit_time_hrs", "sttn_from", "sttn_to", "commodity", "rake_type"]
     df = pd.DataFrame([{
         "received_time": r.received_time,
         "transit_time_hrs": r.transit_time_hrs,
@@ -273,7 +314,7 @@ def query_to_df(rows):
         "sttn_to": r.sttn_to,
         "commodity": r.commodity,
         "rake_type": r.rake_type
-    } for r in rows])
+    } for r in rows], columns=columns)
 
     # map codes → readable names once
     df["sttn_from"] = df["sttn_from"].apply(get_station_display_name)
@@ -350,6 +391,12 @@ def get_filters():
 
 # ------------------ ROUTES ------------------
 
+@app.route("/healthz")
+def healthz():
+    with engine.connect() as conn:
+        conn.execute(text("SELECT 1"))
+    return jsonify(status="ok")
+
 @app.route("/")
 def index():
     return redirect("/dashboard")
@@ -361,19 +408,14 @@ def upload():
         if not file or not file.filename.endswith('.csv'):
             return "Invalid file", 400
 
-        filepath = os.path.join(UPLOAD_FOLDER, file.filename)
-        file.save(filepath)
-
         try:
-            df_raw = pd.read_csv(filepath)
+            df_raw = pd.read_csv(file.stream)
             df_clean = clean_data(df_raw)
             inserted, skipped = insert_cleaned_data(df_clean)
             msg = f"Processed. Inserted: {inserted}, Skipped (duplicates/old): {skipped}"
         except Exception as e:
             msg = f"Error processing file: {str(e)}"
             print(msg)
-
-        os.remove(filepath)  # cleanup
 
         return redirect("/dashboard?msg=" + msg)
 
@@ -1331,4 +1373,9 @@ def reload_config():
 # ------------------ RUN ------------------
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    # Local development only; production runs under gunicorn (see Dockerfile).
+    app.run(
+        host="0.0.0.0",
+        port=int(os.environ.get("PORT", 5000)),
+        debug=os.environ.get("FLASK_DEBUG") == "1",
+    )

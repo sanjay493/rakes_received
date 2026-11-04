@@ -1,0 +1,13 @@
+.git
+.gitignore
+.dockerignore
+Dockerfile
+README.md
+venv
+.venv
+__pycache__
+*.pyc
+uploads
+rake_data_bak.db
+cleaned_data_debug.csv
+check_db.py
