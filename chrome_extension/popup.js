@@ -55,6 +55,8 @@ async function send() {
   try {
     const response = await fetch(API_URL, {
       method: "POST",
+      // Without this, a 401 from the site's login makes Chrome show a password box.
+      credentials: "omit",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
       body: JSON.stringify(table),
     });

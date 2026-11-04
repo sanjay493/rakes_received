@@ -7,9 +7,17 @@ function extractRakeTable() {
     "sttn_from", "sttn_to", "cmdt", "totl_unts", "rake_type",
   ];
 
-  const cellText = (cell) => cell.textContent.replace(/\s+/g, " ").trim();
-  // Same heading rules as clean_data() in app.py.
-  const columnName = (cell) => cellText(cell).toLowerCase().replace(/ /g, "_").replace(/\./g, "");
+  const cellText = (cell) => {
+    const copy = cell.cloneNode(true);
+    copy.querySelectorAll("br").forEach((br) => br.replaceWith(" "));
+    return copy.textContent.replace(/\s+/g, " ").trim();
+  };
+  // Headings may be spaced differently, such as "SR. NO." or "SR.NO.", so ignore spacing and dots.
+  const headingKey = (text) => text.toLowerCase().replace(/[\s._]/g, "");
+  const columnName = (cell) => {
+    const key = headingKey(cellText(cell));
+    return REQUIRED_COLUMNS.find((column) => headingKey(column) === key) || key;
+  };
 
   let best = null;
   const tables = [...document.querySelectorAll("table")];
