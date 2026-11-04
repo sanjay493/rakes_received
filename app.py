@@ -11,6 +11,8 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.dialects.sqlite import insert
 from sqlalchemy.exc import IntegrityError
 
+from inbound_exports import build_excel, build_pdf
+
 # ------------------ APP SETUP ------------------
 
 app = Flask(__name__)
@@ -666,10 +668,8 @@ def healthz():
 def index():
     return redirect("/dashboard")
 
-@app.route("/inbound")
-def inbound():
-    """Show the most recently imported Loaded In-Bound list."""
-    destination = request.args.get("sttn_to", "")
+def inbound_data(destination):
+    """Everything the In-Bound page and its downloads show, for the latest list."""
     session = SessionDB()
     try:
         imported_at = session.query(func.max(InboundRake.imported_at)).scalar()
@@ -692,18 +692,46 @@ def inbound():
         rake.commodity_name = commodity_name(rake.cmdt)
         rake.stabled = is_stabled(rake)
 
-    return render_template(
-        "inbound.html",
-        rakes=rakes,
-        report=commodity_plant_report(rakes),
-        plants=PLANTS,
-        rakes_with_distance=sum(rake.distance_km is not None for rake in rakes),
-        stabled_count=sum(rake.stabled for rake in rakes),
-        counts=counts,
-        total=sum(count for _, count in counts),
-        destination=destination,
-        imported_at=imported_at,
+    return {
+        "rakes": rakes,
+        "report": commodity_plant_report(rakes),
+        "plants": PLANTS,
+        "rakes_with_distance": sum(rake.distance_km is not None for rake in rakes),
+        "stabled_count": sum(rake.stabled for rake in rakes),
+        "counts": counts,
+        "total": sum(count for _, count in counts),
+        "destination": destination,
+        "imported_at": imported_at,
+    }
+
+@app.route("/inbound")
+def inbound():
+    """Show the most recently imported Loaded In-Bound list."""
+    return render_template("inbound.html", **inbound_data(request.args.get("sttn_to", "")))
+
+def inbound_download(build, extension, mimetype):
+    """Send the latest In-Bound report as a file, following the page's destination filter."""
+    data = inbound_data(request.args.get("sttn_to", ""))
+    if not data["imported_at"]:
+        return "No In-Bound list has been received yet.", 404
+
+    parts = ["inbound_report", station_code(data["destination"]), data["imported_at"].strftime("%Y%m%d_%H%M")]
+    return send_file(
+        io.BytesIO(build(data)),
+        mimetype=mimetype,
+        as_attachment=True,
+        download_name="_".join(filter(None, parts)) + extension,
     )
+
+@app.route("/inbound/report.xlsx")
+def inbound_excel():
+    return inbound_download(
+        build_excel, ".xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+
+@app.route("/inbound/report.pdf")
+def inbound_pdf():
+    return inbound_download(build_pdf, ".pdf", "application/pdf")
 
 @app.route("/upload", methods=["GET", "POST"])
 def upload():

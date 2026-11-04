@@ -18,6 +18,10 @@
         {{ total }} rakes in the list sent from FOIS on {{ imported_at.strftime('%d-%m-%Y %H:%M') }} IST.
         {% if stabled_count %}<strong style="color: #b42318;">{{ stabled_count }} stabled{% if destination %} to {{ destination }}{% endif %} (status ST).</strong>{% endif %}
     </p>
+    <div style="display: flex; gap: 10px; flex-wrap: wrap; margin-top: 15px;">
+        <a class="btn-primary" style="text-decoration: none; text-align: center;" href="{{ url_for('inbound_excel', sttn_to=destination or None) }}">Download Excel</a>
+        <a class="btn-primary" style="text-decoration: none; text-align: center;" href="{{ url_for('inbound_pdf', sttn_to=destination or None) }}">Download PDF</a>
+    </div>
     <div class="unit-buttons">
         <a class="unit-btn {% if not destination %}active{% endif %}" href="{{ url_for('inbound') }}">All ({{ total }})</a>
         {% for sttn_to, count in counts %}
