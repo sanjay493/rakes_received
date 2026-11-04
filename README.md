@@ -69,6 +69,8 @@ It recognises two reports by their headings:
 
 Select **Show All** before sending, because the extension only reads rows that are on the page. A Loaded In-Bound report that's filtered or only partly shown becomes the whole latest list, so send the complete report.
 
-The `/inbound` page also counts rakes by commodity, plant and 50 km distance slab, and estimates the km left for each rake. To change the slab width, edit `SLAB_KM` in `app.py`. The km left is the straight-line distance from `CRNT LOCN` to `STTN TO`, so the rail route is longer. Coordinates come from `station_locations.csv`, built from the CC0 [datameet/railways](https://github.com/datameet/railways) stations data. It doesn't include plant yards, so `YARD_STATIONS` in `app.py` substitutes the nearest city station, and rakes at a location it doesn't know show `—`. To add a missing location, add its code to the CSV.
+The `/inbound` page also counts rakes by commodity, plant and 50 km distance slab, and shows the km left for each rake. To change the slab width, edit `SLAB_KM` in `app.py`.
 
-If the site moves to another address, update `REPORTS` in `popup.js` and `host_permissions` in `manifest.json`.
+The km left is the goods distance from `CRNT LOCN` to `STTN TO` on the Railways' [Rates Branch System](https://rbs.indianrail.gov.in/ShortPath/ShortPath.jsp). That site didn't respond to the server when tested from Amsterdam, so the extension does the lookups from the user's browser. After an In-Bound send, it opens a tab that looks up each new station and yard pair, one every 1.5 seconds, and saves the result in the `rail_distances` table. Each pair is only looked up once, and only rakes going to the plants are looked up. If the tab is closed early, the next send picks up the rest.
+
+If the site moves to another address, update `REPORTS` in `popup.js`, the URLs in `lookup.js` and `host_permissions` in `manifest.json`.

@@ -1,7 +1,7 @@
 from flask import Flask, Response, render_template, request, redirect, send_file, jsonify
 import pandas as pd
 import plotly.graph_objs as go
-import csv, hmac, math, os, io, re, shutil
+import hmac, math, os, io, re, shutil
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import create_engine, func, text, Column, Integer, String, Float, DateTime, UniqueConstraint
@@ -46,7 +46,7 @@ if os.environ.get("REQUIRE_AUTH") == "1" and not APP_PASSWORD:
 @app.before_request
 def require_login():
     # The import endpoints check API_TOKEN themselves.
-    if not APP_PASSWORD or request.endpoint in ("healthz", "import_rakes", "import_inbound"):
+    if not APP_PASSWORD or request.endpoint in ("healthz", "import_rakes", "import_inbound", "import_distances"):
         return None
 
     auth = request.authorization
@@ -121,6 +121,16 @@ class InboundRake(Base):
     loco_no = Column(String)
     loco_type = Column(String)
     expd_arvl_time = Column(String)
+
+class RailDistance(Base):
+    """Goods distance from a station to a plant yard, looked up once on the Railways' RBS site by
+    the Chrome extension. km is empty when RBS doesn't know the station."""
+    __tablename__ = "rail_distances"
+
+    from_code = Column(String, primary_key=True)
+    to_code = Column(String, primary_key=True)
+    km = Column(Float)
+    fetched_at = Column(DateTime, nullable=False)
 
 # FOIS heading (lower case, without spaces, dots or underscores) -> InboundRake column
 INBOUND_HEADINGS = {
@@ -217,48 +227,38 @@ DESTINATION_PLANTS = {
     "NHSB": "RSP",
 }
 
-# ------------------ DISTANCE ESTIMATE ------------------
+# ------------------ RAIL DISTANCE ------------------
 
 SLAB_KM = 50  # Width of each distance slab
 UNKNOWN_SLAB = "Unknown"
+MAX_RAIL_KM = 10000
 
-def load_station_locations():
-    """Read station coordinates: {code: (lat, lon)}."""
-    with open(os.path.join(BASE_DIR, "station_locations.csv"), newline="") as f:
-        return {row["code"]: (float(row["lat"]), float(row["lon"])) for row in csv.DictReader(f)}
+def station_code(value):
+    """A clean station code, or None if the value isn't one. RBS codes are up to 4 characters."""
+    code = (value or "").strip().upper() if isinstance(value, str) else ""
+    return code if re.fullmatch(r"[A-Z0-9]{1,4}", code) else None
 
-STATION_LOCATIONS = load_station_locations()
+def missing_distance_pairs(rakes, session):
+    """(station, yard) pairs for rakes going to the plants that have never been looked up."""
+    known = set(session.query(RailDistance.from_code, RailDistance.to_code).all())
+    pairs = set()
+    for rake in rakes:
+        pair = (station_code(rake.crnt_locn), station_code(rake.sttn_to))
+        if all(pair) and pair[1] in DESTINATION_PLANTS and pair[0] != pair[1] and pair not in known:
+            pairs.add(pair)
+    return sorted(pairs)
 
-# Plant yards aren't in the station data, so use the nearest city station instead.
-YARD_STATIONS = {
-    "BSCS": "BKSC",  # Bokaro
-    "BSPC": "BIA",   # Bhilai
-    "DSEY": "DGR",   # Durgapur
-    "IISD": "ASN",   # Burnpur
-    "BCME": "ASN",   # Burnpur
-    "HSPG": "ROU",   # Rourkela
-    "NHSB": "ROU",   # Rourkela
-}
-
-def station_location(code):
-    code = (code or "").strip().upper()
-    return STATION_LOCATIONS.get(YARD_STATIONS.get(code, code))
-
-def distance_left_km(from_code, to_code):
-    """Straight-line km between two stations, or None if either location is unknown.
-    The rail route is longer, so this is only an estimate."""
-    start, end = station_location(from_code), station_location(to_code)
+def distance_left_km(rake, distances):
+    """Km left for a rake using {(station, yard): km}, or None if it isn't known."""
+    start, end = station_code(rake.crnt_locn), station_code(rake.sttn_to)
     if not start or not end:
         return None
-
-    lat1, lon1, lat2, lon2 = map(math.radians, (*start, *end))
-    a = math.sin((lat2 - lat1) / 2) ** 2 + math.cos(lat1) * math.cos(lat2) * math.sin((lon2 - lon1) / 2) ** 2
-    return round(2 * 6371 * math.asin(math.sqrt(a)))
+    return 0 if start == end else distances.get((start, end))
 
 def slab_start(km):
     """Where a distance's slab starts, so 50 km is in the slab starting at 50.
     Unknown distances sort after every slab."""
-    return math.inf if km is None else km // SLAB_KM * SLAB_KM
+    return math.inf if km is None else int(km) // SLAB_KM * SLAB_KM
 
 def slab_label(start):
     return UNKNOWN_SLAB if start == math.inf else f"{start}-{start + SLAB_KM} km"
@@ -468,12 +468,15 @@ def query_to_df(rows):
     return df
 # ------------------ CHROME EXTENSION IMPORT ------------------
 
+def api_token_valid():
+    auth = request.authorization
+    token = auth.token if auth and auth.type == "bearer" else None
+    return bool(API_TOKEN and token and hmac.compare_digest(token.encode(), API_TOKEN.encode()))
+
 def read_import_request():
     """Check the API token and read {"columns": [...], "rows": [[...], ...]} from the request.
     Returns (data, None), or (None, error response)."""
-    auth = request.authorization
-    token = auth.token if auth and auth.type == "bearer" else None
-    if not API_TOKEN or not token or not hmac.compare_digest(token.encode(), API_TOKEN.encode()):
+    if not api_token_valid():
         return None, (jsonify(error="Invalid or missing API token"), 401)
 
     data = request.get_json(silent=True)
@@ -524,12 +527,49 @@ def import_inbound():
 
     session = SessionDB()
     try:
+        missing = missing_distance_pairs(records, session)
         session.add_all(records)
         session.commit()
     finally:
         session.close()
 
-    return jsonify(received=len(rows), inserted=len(records))
+    return jsonify(
+        received=len(rows),
+        inserted=len(records),
+        missing_distances=[{"from": start, "to": end} for start, end in missing],
+    )
+
+@app.route("/api/distances", methods=["POST"])
+def import_distances():
+    """Save distances the extension looked up: {"distances": [{"from", "to", "km"}, ...]}.
+    An empty km means RBS doesn't know the station, so it won't be looked up again."""
+    if not api_token_valid():
+        return jsonify(error="Invalid or missing API token"), 401
+
+    data = request.get_json(silent=True)
+    distances = data.get("distances") if isinstance(data, dict) else None
+    if not isinstance(distances, list):
+        return jsonify(error="Expected JSON with distances"), 400
+
+    fetched_at = datetime.now(IST).replace(tzinfo=None)
+    saved = 0
+    session = SessionDB()
+    try:
+        for item in distances:
+            if not isinstance(item, dict):
+                continue
+            start, end, km = station_code(item.get("from")), station_code(item.get("to")), item.get("km")
+            km_valid = km is None or (
+                isinstance(km, (int, float)) and not isinstance(km, bool) and 0 <= km <= MAX_RAIL_KM
+            )
+            if start and end and km_valid:
+                session.merge(RailDistance(from_code=start, to_code=end, km=km, fetched_at=fetched_at))
+                saved += 1
+        session.commit()
+    finally:
+        session.close()
+
+    return jsonify(saved=saved)
 
 # ------------------ NEW: API ENDPOINTS FOR DYNAMIC FILTERS ------------------
 
@@ -627,11 +667,12 @@ def inbound():
         if destination:
             latest = latest.filter(InboundRake.sttn_to == destination)
         rakes = latest.order_by(InboundRake.id).all()
+        distances = {(d.from_code, d.to_code): d.km for d in session.query(RailDistance).all()}
     finally:
         session.close()
 
     for rake in rakes:
-        rake.distance_km = distance_left_km(rake.crnt_locn, rake.sttn_to)
+        rake.distance_km = distance_left_km(rake, distances)
 
     return render_template(
         "inbound.html",

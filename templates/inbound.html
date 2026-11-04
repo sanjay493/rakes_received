@@ -72,8 +72,8 @@
     <p>No rakes in this list are going to the plants.</p>
     {% endif %}
     <p style="margin: 12px 0 0; font-size: 13px; color: #52606d;">
-        Km left is a straight-line estimate from the current location to the destination, so the rail route will be longer.
-        It's available for {{ rakes_with_distance }} of {{ rakes|length }} rakes in the list; "Unknown" means the location has no known coordinates.
+        Km left is the goods distance from the current location to the destination on the Railways' Rates Branch System.
+        It's available for {{ rakes_with_distance }} of {{ rakes|length }} rakes in the list; "Unknown" means it hasn't been looked up yet or the site doesn't know that location.
         {% if report.elsewhere %}{{ report.elsewhere }} rakes going to other destinations aren't in this table.{% endif %}
     </p>
 </div>
@@ -89,7 +89,7 @@
                 <th style="padding: 8px;">Cmdt</th>
                 <th style="padding: 8px;">Units</th>
                 <th style="padding: 8px;">Current Location</th>
-                <th style="padding: 8px; text-align: right;">Km Left (est.)</th>
+                <th style="padding: 8px; text-align: right;">Km Left</th>
                 <th style="padding: 8px;">Status</th>
                 <th style="padding: 8px;">Status Time</th>
                 <th style="padding: 8px;">Dept Time</th>
@@ -108,7 +108,7 @@
                 <td style="padding: 8px;">{{ rake.cmdt or '' }}</td>
                 <td style="padding: 8px;">{{ rake.totl_unts or '' }}</td>
                 <td style="padding: 8px;">{{ rake.crnt_locn or '' }}</td>
-                <td style="padding: 8px; text-align: right;">{{ rake.distance_km if rake.distance_km is not none else '—' }}</td>
+                <td style="padding: 8px; text-align: right;">{{ rake.distance_km|round|int if rake.distance_km is not none else '—' }}</td>
                 <td style="padding: 8px;">{{ rake.stts_code or '' }}</td>
                 <td style="padding: 8px;">{{ rake.stts_time or '' }}</td>
                 <td style="padding: 8px;">{{ rake.dept_time or '' }}</td>

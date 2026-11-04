@@ -71,6 +71,10 @@ async function send() {
       showStatus(result.error || `Server error (${response.status}).`, "error");
     } else if (table.report === "inbound") {
       showStatus(`Sent ${result.inserted} rakes. This is now the latest In-Bound list.`, "success");
+      if (result.missing_distances?.length) {
+        await chrome.storage.local.set({ pendingDistances: result.missing_distances });
+        await chrome.tabs.create({ url: "lookup.html" });
+      }
     } else {
       const unusable = result.received - result.inserted - result.skipped;
       showStatus(
