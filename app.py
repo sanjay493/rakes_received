@@ -229,6 +229,7 @@ DESTINATION_PLANTS = {
 
 # ------------------ RAIL DISTANCE ------------------
 
+STABLED_STATUS = "ST"  # STTS CODE of a stabled rake
 SLAB_KM = 50  # Width of each distance slab
 UNKNOWN_SLAB = "Unknown"
 MAX_RAIL_KM = 10000
@@ -263,8 +264,32 @@ def slab_start(km):
 def slab_label(start):
     return UNKNOWN_SLAB if start == math.inf else f"{start}-{start + SLAB_KM} km"
 
+def commodity_name(code):
+    """The readable name from the commodity mappings, or the code if there isn't one."""
+    code = (code or "").strip().upper()
+    return commodity_mappings.get(code, code) or "—"
+
+def is_stabled(rake):
+    return (rake.stts_code or "").strip().upper() == STABLED_STATUS
+
+def counts_line(counts):
+    """Per-plant counts plus overall totals, from {"rakes": {plant: n}, "stabled": {plant: n}}."""
+    return {
+        "plants": counts["rakes"],
+        "stabled": counts["stabled"],
+        "total": sum(counts["rakes"].values()),
+        "total_stabled": sum(counts["stabled"].values()),
+    }
+
+def add_counts(lines):
+    """Add up counts_line() results, plant by plant."""
+    return counts_line({
+        "rakes": {plant: sum(line["plants"][plant] for line in lines) for plant in PLANTS},
+        "stabled": {plant: sum(line["stabled"][plant] for line in lines) for plant in PLANTS},
+    })
+
 def commodity_plant_report(rakes):
-    """Count rakes by commodity, distance slab and plant, largest commodity first.
+    """Count rakes and stabled rakes by commodity, distance slab and plant, largest commodity first.
     Rakes going anywhere other than the plants are left out and only counted."""
     counts = {}
     elsewhere = 0
@@ -273,33 +298,24 @@ def commodity_plant_report(rakes):
         if not plant:
             elsewhere += 1
             continue
-        slabs = counts.setdefault(rake.cmdt or "—", {})
-        plants = slabs.setdefault(slab_start(rake.distance_km), dict.fromkeys(PLANTS, 0))
-        plants[plant] += 1
-
-    def totals(rows):
-        return {plant: sum(row[plant] for row in rows) for plant in PLANTS}
+        slabs = counts.setdefault(commodity_name(rake.cmdt), {})
+        slab = slabs.setdefault(slab_start(rake.distance_km), {
+            "rakes": dict.fromkeys(PLANTS, 0),
+            "stabled": dict.fromkeys(PLANTS, 0),
+        })
+        slab["rakes"][plant] += 1
+        slab["stabled"][plant] += is_stabled(rake)
 
     report = []
     for commodity, slabs in counts.items():
-        plant_totals = totals(slabs.values())
-        report.append({
-            "commodity": commodity,
-            "slabs": [
-                # Only slabs with rakes are in the dict, so empty ones never appear.
-                {"label": slab_label(start), "plants": slabs[start], "total": sum(slabs[start].values())}
-                for start in sorted(slabs)
-            ],
-            "plant_totals": plant_totals,
-            "total": sum(plant_totals.values()),
-        })
-    report.sort(key=lambda row: (-row["total"], row["commodity"]))
+        # Only slabs with rakes are in the dict, so empty ones never appear.
+        lines = [{"label": slab_label(start), **counts_line(slabs[start])} for start in sorted(slabs)]
+        report.append({"commodity": commodity, "slabs": lines, "totals": add_counts(lines)})
+    report.sort(key=lambda row: (-row["totals"]["total"], row["commodity"]))
 
-    plant_totals = totals([row["plant_totals"] for row in report])
     return {
         "rows": report,
-        "plant_totals": plant_totals,
-        "total": sum(plant_totals.values()),
+        "totals": add_counts([row["totals"] for row in report]),
         "elsewhere": elsewhere,
     }
 
@@ -673,6 +689,8 @@ def inbound():
 
     for rake in rakes:
         rake.distance_km = distance_left_km(rake, distances)
+        rake.commodity_name = commodity_name(rake.cmdt)
+        rake.stabled = is_stabled(rake)
 
     return render_template(
         "inbound.html",
@@ -680,6 +698,7 @@ def inbound():
         report=commodity_plant_report(rakes),
         plants=PLANTS,
         rakes_with_distance=sum(rake.distance_km is not None for rake in rakes),
+        stabled_count=sum(rake.stabled for rake in rakes),
         counts=counts,
         total=sum(count for _, count in counts),
         destination=destination,

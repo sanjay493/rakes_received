@@ -1,4 +1,14 @@
 {% extends "base.html" %}
+
+{% macro count_cell(rakes, stabled) %}
+<td style="padding: 8px 16px; text-align: right;">{{ rakes or '' }}{% if stabled %} <span style="color: #b42318; font-weight: bold;">({{ stabled }} ST)</span>{% endif %}</td>
+{% endmacro %}
+
+{% macro count_cells(line) %}
+{% for plant in plants %}{{ count_cell(line.plants[plant], line.stabled[plant]) }}{% endfor %}
+{{ count_cell(line.total, line.total_stabled) }}
+{% endmacro %}
+
 {% block content %}
 
 <div class="card">
@@ -6,6 +16,7 @@
     {% if imported_at %}
     <p style="margin-bottom: 0;">
         {{ total }} rakes in the list sent from FOIS on {{ imported_at.strftime('%d-%m-%Y %H:%M') }} IST.
+        {% if stabled_count %}<strong style="color: #b42318;">{{ stabled_count }} stabled{% if destination %} to {{ destination }}{% endif %} (status ST).</strong>{% endif %}
     </p>
     <div class="unit-buttons">
         <a class="unit-btn {% if not destination %}active{% endif %}" href="{{ url_for('inbound') }}">All ({{ total }})</a>
@@ -43,18 +54,12 @@
                 <th scope="rowgroup" rowspan="{{ row.slabs|length + 1 }}" style="padding: 8px 16px; text-align: left; vertical-align: top; border-right: 1px solid #e4e7eb;">{{ row.commodity }}</th>
                 {% endif %}
                 <td style="padding: 8px 16px;">{{ slab.label }}</td>
-                {% for plant in plants %}
-                <td style="padding: 8px 16px; text-align: right;">{{ slab.plants[plant] or '' }}</td>
-                {% endfor %}
-                <td style="padding: 8px 16px; text-align: right;">{{ slab.total }}</td>
+                {{ count_cells(slab) }}
             </tr>
             {% endfor %}
             <tr style="background: #e8eef5; font-weight: bold; border-bottom: 2px solid #1f3a5f;">
                 <td style="padding: 8px 16px;">Total</td>
-                {% for plant in plants %}
-                <td style="padding: 8px 16px; text-align: right;">{{ row.plant_totals[plant] or '' }}</td>
-                {% endfor %}
-                <td style="padding: 8px 16px; text-align: right;">{{ row.total }}</td>
+                {{ count_cells(row.totals) }}
             </tr>
         </tbody>
         {% endfor %}
@@ -62,9 +67,9 @@
             <tr style="background: #1f3a5f; color: white; font-weight: bold;">
                 <td style="padding: 8px 16px;" colspan="2">All commodities</td>
                 {% for plant in plants %}
-                <td style="padding: 8px 16px; text-align: right;">{{ report.plant_totals[plant] or '' }}</td>
+                <td style="padding: 8px 16px; text-align: right;">{{ report.totals.plants[plant] or '' }}{% if report.totals.stabled[plant] %} ({{ report.totals.stabled[plant] }} ST){% endif %}</td>
                 {% endfor %}
-                <td style="padding: 8px 16px; text-align: right;">{{ report.total }}</td>
+                <td style="padding: 8px 16px; text-align: right;">{{ report.totals.total }}{% if report.totals.total_stabled %} ({{ report.totals.total_stabled }} ST){% endif %}</td>
             </tr>
         </tfoot>
     </table>
@@ -72,6 +77,7 @@
     <p>No rakes in this list are going to the plants.</p>
     {% endif %}
     <p style="margin: 12px 0 0; font-size: 13px; color: #52606d;">
+        Each cell shows all rakes, with the stabled ones (status ST) in brackets. For example, "5 (2 ST)" is 5 rakes, 2 of them stabled.
         Km left is the goods distance from the current location to the destination on the Railways' Rates Branch System.
         It's available for {{ rakes_with_distance }} of {{ rakes|length }} rakes in the list; "Unknown" means it hasn't been looked up yet or the site doesn't know that location.
         {% if report.elsewhere %}{{ report.elsewhere }} rakes going to other destinations aren't in this table.{% endif %}
@@ -86,7 +92,7 @@
                 <th style="padding: 8px;">Load Name</th>
                 <th style="padding: 8px;">From</th>
                 <th style="padding: 8px;">To</th>
-                <th style="padding: 8px;">Cmdt</th>
+                <th style="padding: 8px;">Commodity</th>
                 <th style="padding: 8px;">Units</th>
                 <th style="padding: 8px;">Current Location</th>
                 <th style="padding: 8px; text-align: right;">Km Left</th>
@@ -100,16 +106,16 @@
         </thead>
         <tbody>
             {% for rake in rakes %}
-            <tr style="border-bottom: 1px solid #e4e7eb;">
+            <tr style="border-bottom: 1px solid #e4e7eb;{% if rake.stabled %} background: #fef3f2;{% endif %}">
                 <td style="padding: 8px;">{{ rake.rake_id or '' }}</td>
                 <td style="padding: 8px;">{{ rake.load_name or '' }}</td>
                 <td style="padding: 8px;">{{ rake.sttn_from or '' }}</td>
                 <td style="padding: 8px;">{{ rake.sttn_to or '' }}</td>
-                <td style="padding: 8px;">{{ rake.cmdt or '' }}</td>
+                <td style="padding: 8px;">{{ rake.commodity_name }}</td>
                 <td style="padding: 8px;">{{ rake.totl_unts or '' }}</td>
                 <td style="padding: 8px;">{{ rake.crnt_locn or '' }}</td>
                 <td style="padding: 8px; text-align: right;">{{ rake.distance_km|round|int if rake.distance_km is not none else '—' }}</td>
-                <td style="padding: 8px;">{{ rake.stts_code or '' }}</td>
+                <td style="padding: 8px;{% if rake.stabled %} color: #b42318; font-weight: bold;{% endif %}">{{ rake.stts_code or '' }}{% if rake.stabled %} (stabled){% endif %}</td>
                 <td style="padding: 8px;">{{ rake.stts_time or '' }}</td>
                 <td style="padding: 8px;">{{ rake.dept_time or '' }}</td>
                 <td style="padding: 8px;">{{ rake.transit_time or '' }}</td>

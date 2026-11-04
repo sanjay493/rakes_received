@@ -69,7 +69,7 @@ It recognises two reports by their headings:
 
 Select **Show All** before sending, because the extension only reads rows that are on the page. A Loaded In-Bound report that's filtered or only partly shown becomes the whole latest list, so send the complete report.
 
-The `/inbound` page also counts rakes by commodity, plant and 50 km distance slab, and shows the km left for each rake. To change the slab width, edit `SLAB_KM` in `app.py`.
+The `/inbound` page also counts rakes by commodity, plant and 50 km distance slab, and shows the km left for each rake. Each cell also shows how many rakes are stabled (`STTS CODE` of `ST`), and commodities use the readable names from the commodity mappings, so codes sharing a name are combined. To change the slab width, edit `SLAB_KM` in `app.py`.
 
 The km left is the goods distance from `CRNT LOCN` to `STTN TO` on the Railways' [Rates Branch System](https://rbs.indianrail.gov.in/ShortPath/ShortPath.jsp). That site didn't respond to the server when tested from Amsterdam, so the extension does the lookups from the user's browser. After an In-Bound send, it opens a tab that looks up each new station and yard pair, one every 1.5 seconds, and saves the result in the `rail_distances` table. Each pair is only looked up once, and only rakes going to the plants are looked up. If the tab is closed early, the next send picks up the rest.
 
