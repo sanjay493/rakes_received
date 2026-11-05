@@ -1,7 +1,7 @@
 from flask import Flask, Response, render_template, request, redirect, send_file, jsonify
 import pandas as pd
 import plotly.graph_objs as go
-import hmac, math, os, io, re, shutil
+import hmac, math, os, io, re, shutil, zipfile
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import create_engine, func, text, Column, Integer, String, Float, DateTime, UniqueConstraint
@@ -732,6 +732,22 @@ def inbound_excel():
 @app.route("/inbound/report.pdf")
 def inbound_pdf():
     return inbound_download(build_pdf, ".pdf", "application/pdf")
+
+@app.route("/inbound/extension.zip")
+def inbound_extension():
+    """Send the Chrome extension, with manifest.json at the top level so Load unpacked accepts it."""
+    folder = os.path.join(BASE_DIR, "chrome_extension")
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+        for name in sorted(os.listdir(folder)):
+            archive.write(os.path.join(folder, name), name)
+    buffer.seek(0)
+    return send_file(
+        buffer,
+        mimetype="application/zip",
+        as_attachment=True,
+        download_name="rakes_received_extension.zip",
+    )
 
 @app.route("/upload", methods=["GET", "POST"])
 def upload():

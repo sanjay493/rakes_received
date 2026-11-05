@@ -48,9 +48,12 @@ The image includes `rake_data.db`, so keep it in a private registry if the data 
 
 To install it:
 
-1. Open `chrome://extensions` and turn on **Developer mode**.
-2. Click **Load unpacked** and choose the `chrome_extension` folder.
-3. Pin the extension to the toolbar.
+1. On the `/inbound` page, click **Download Extension** and unzip the file into a folder you'll keep. (On a computer with this repo, you can use the `chrome_extension` folder instead.)
+2. Open `chrome://extensions` and turn on **Developer mode**.
+3. Click **Load unpacked** and choose the folder.
+4. Pin the extension to the toolbar.
+
+Chrome doesn't let a website install an extension directly, so these steps are needed once on each computer. To update, unzip a new download over the same folder and click the extension's reload icon on `chrome://extensions`. The download needs the site login and doesn't include the API token, so give the token to each user separately.
 
 To use it:
 

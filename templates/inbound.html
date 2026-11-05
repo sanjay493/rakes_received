@@ -35,6 +35,24 @@
     {% endif %}
 </div>
 
+<div class="card">
+    <h3 style="margin-top: 0;">Chrome Extension</h3>
+    <p>To send FOIS reports from another computer, install the extension in Chrome on that computer. You only need to do this once.</p>
+    <a class="btn-primary" style="display: inline-block; text-decoration: none; text-align: center;" href="{{ url_for('inbound_extension') }}">Download Extension</a>
+    <details style="margin-top: 15px;">
+        <summary style="cursor: pointer; font-weight: bold;">How to install and use it</summary>
+        <ol style="margin-bottom: 0;">
+            <li>Unzip the downloaded file into a folder you'll keep. Chrome keeps loading the extension from that folder, so don't delete it.</li>
+            <li>In Chrome, open <code>chrome://extensions</code> (type it into the address bar) and turn on <strong>Developer mode</strong>.</li>
+            <li>Click <strong>Load unpacked</strong> and choose the unzipped folder.</li>
+            <li>Click the puzzle-piece icon in the toolbar and pin <strong>Rakes Received Exporter</strong>.</li>
+            <li>Log in to FOIS, open the report and select <strong>Show All</strong>.</li>
+            <li>Click the extension icon, enter the API token (it's remembered after the first send) and click <strong>Send to dashboard</strong>. Ask your administrator for the token.</li>
+        </ol>
+        <p style="margin-bottom: 0;">To update the extension, unzip a new download over the same folder, then click the reload icon on its card in <code>chrome://extensions</code>.</p>
+    </details>
+</div>
+
 {% if rakes %}
 <div class="card" style="overflow-x: auto;">
     <h3 style="margin-top: 0;">Rakes by Commodity, Plant and Distance Left{% if destination %} ({{ destination }}){% endif %}</h3>
