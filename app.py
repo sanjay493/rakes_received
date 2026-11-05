@@ -699,6 +699,8 @@ def inbound_data(destination):
         "rakes": rakes,
         "report": commodity_plant_report(rakes),
         "plants": INBOUND_COLUMNS,
+        "distance_pairs": len(distances),
+        "distance_pairs_with_km": sum(km is not None for km in distances.values()),
         "rakes_with_distance": sum(rake.distance_km is not None for rake in rakes),
         "stabled_count": sum(rake.stabled for rake in rakes),
         "counts": counts,

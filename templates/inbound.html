@@ -33,6 +33,9 @@
         No list has been received yet. Open the Loaded In-Bound report on FOIS and send it with the Chrome extension.
     </p>
     {% endif %}
+    <p style="margin: 15px 0 0; font-size: 13px; color: #52606d;">
+        Distances saved: {{ distance_pairs }} station pairs ({{ distance_pairs_with_km }} with km, {{ distance_pairs - distance_pairs_with_km }} unknown to RBS). Saved pairs aren't looked up on RBS again.
+    </p>
 </div>
 
 <div class="card">
