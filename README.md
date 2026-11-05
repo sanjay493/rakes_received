@@ -31,6 +31,7 @@ Run a single instance. SQLite lives on one volume and can't be shared between in
 | --- | --- | --- |
 | `APP_PASSWORD` | none | Turns on the HTTP Basic login. Required in the container. |
 | `APP_USERNAME` | `admin` | Login username. |
+| `API_TOKEN` | none | Token the Chrome extension uses to import data. Imports are refused until it's set. |
 | `DATA_DIR` | `/data` in the container, the app folder locally | Where the database and mapping files are stored. |
 | `PORT` | `8080` in the container, `5000` locally | Port to listen on. Most hosts set this for you. |
 | `FLASK_DEBUG` | off | Set to `1` for local auto-reload. Never set it in production. |
@@ -40,3 +41,41 @@ Run a single instance. SQLite lives on one volume and can't be shared between in
 On first boot, `rake_data.db`, `station_mappings.txt` and `commodity_mappings.txt` are copied from the image to `DATA_DIR`. After that, the volume copies are the live ones: redeploying won't overwrite them, so changes to those files in git won't reach a running deployment. Back up the volume, since it holds all uploaded data.
 
 The image includes `rake_data.db`, so keep it in a private registry if the data is sensitive.
+
+## Chrome extension
+
+`chrome_extension/` sends the rake table on the open page to the dashboard, so users don't need to download and upload a CSV.
+
+To install it:
+
+1. On the `/inbound` page, click **Download Extension** and unzip the file into a folder you'll keep. (On a computer with this repo, you can use the `chrome_extension` folder instead.)
+2. Open `chrome://extensions` and turn on **Developer mode**.
+3. Click **Load unpacked** and choose the folder.
+4. Pin the extension to the toolbar.
+
+Chrome doesn't let a website install an extension directly, so these steps are needed once on each computer. To update, unzip a new download over the same folder and click the extension's reload icon on `chrome://extensions`. The download needs the site login and doesn't include the API token, so give the token to each user separately.
+
+To use it:
+
+1. Log in to FOIS as usual and open the rake report.
+2. Click the extension icon. It shows how many rows it found.
+3. Enter the API token (it's remembered after the first send) and click **Send to dashboard**.
+
+The extension runs only when its icon is clicked, reads only tables on the open page, and never sees FOIS passwords.
+
+It recognises two reports by their headings:
+
+| Report | Required headings | What happens on send |
+| --- | --- | --- |
+| Rakes Received | `Sr No`, `Received Time`, `Dispatched Time`, `Transit Time`, `Sttn From`, `Sttn To`, `Cmdt`, `Totl Unts`, `Rake Type` | Rows are added to the dashboard. Rows already there are skipped, so sending twice is safe. |
+| Loaded In-Bound | `Crnt Locn`, `Stts Time`, `Sttn From`, `Sttn To`, `Rake Id`, `Expd Arvltime` | The rows become the latest list on the `/inbound` page. Older lists stay in the database but aren't shown. |
+
+Select **Show All** before sending, because the extension only reads rows that are on the page. A Loaded In-Bound report that's filtered or only partly shown becomes the whole latest list, so send the complete report.
+
+The `/inbound` page and its downloads only show rakes going to the plants (`BSCS`, `BSPC`, `DSEY`, `IISD`, `BCME`, `HSPG`, `NHSB`) and pellet conversion agents. Rakes to other destinations stay saved in the database but aren't shown. To change the list, edit `DESTINATION_PLANTS` or `PELLET_AGENTS` in `app.py`, but note that `DESTINATION_PLANTS` also filters the dashboard.
+
+The page also counts rakes by commodity, 50 km distance slab, and plant or pellet conversion agent (`PMRN`, `MOMG`, `GFMK`, `SSPL`, `NKKH`), and shows the km left for each rake. Each cell also shows how many rakes are stabled (`STTS CODE` of `ST`), and commodities use the readable names from the commodity mappings, so codes sharing a name are combined. To change the slab width, edit `SLAB_KM` in `app.py`. The page's Download Excel and Download PDF buttons contain the same report and rake list, for the selected destination.
+
+The km left is the goods distance from `CRNT LOCN` to `STTN TO` on the Railways' [Rates Branch System](https://rbs.indianrail.gov.in/ShortPath/ShortPath.jsp). That site didn't respond to the server when tested from Amsterdam, so the extension does the lookups from the user's browser. After an In-Bound send, it opens a tab that looks up each new station and yard pair, one every 1.5 seconds, and saves the result in the `rail_distances` table. Each pair is only looked up once, and only rakes going to the plants and agents are looked up. If the tab is closed early, the next send picks up the rest.
+
+If the site moves to another address, update `REPORTS` in `popup.js`, the URLs in `lookup.js` and `host_permissions` in `manifest.json`.

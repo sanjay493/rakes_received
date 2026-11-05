@@ -1,0 +1,154 @@
+{% extends "base.html" %}
+
+{% macro count_cell(rakes, stabled) %}
+<td style="padding: 8px 16px; text-align: right;">{{ rakes or '' }}{% if stabled %} <span style="color: #b42318; font-weight: bold;">({{ stabled }} ST)</span>{% endif %}</td>
+{% endmacro %}
+
+{% macro count_cells(line) %}
+{% for plant in plants %}{{ count_cell(line.plants[plant], line.stabled[plant]) }}{% endfor %}
+{{ count_cell(line.total, line.total_stabled) }}
+{% endmacro %}
+
+{% block content %}
+
+<div class="card">
+    <h2 style="margin-top: 0;">Loaded In-Bound Rakes</h2>
+    {% if imported_at %}
+    <p style="margin-bottom: 0;">
+        {{ total }} rakes to the plants and pellet agents in the list sent from FOIS on {{ imported_at.strftime('%d-%m-%Y %H:%M') }} IST.
+        {% if stabled_count %}<strong style="color: #b42318;">{{ stabled_count }} stabled{% if destination %} to {{ destination }}{% endif %} (status ST).</strong>{% endif %}
+    </p>
+    <div style="display: flex; gap: 10px; flex-wrap: wrap; margin-top: 15px;">
+        <a class="btn-primary" style="text-decoration: none; text-align: center;" href="{{ url_for('inbound_excel', sttn_to=destination or None) }}">Download Excel</a>
+        <a class="btn-primary" style="text-decoration: none; text-align: center;" href="{{ url_for('inbound_pdf', sttn_to=destination or None) }}">Download PDF</a>
+    </div>
+    <div class="unit-buttons">
+        <a class="unit-btn {% if not destination %}active{% endif %}" href="{{ url_for('inbound') }}">All ({{ total }})</a>
+        {% for sttn_to, count in counts %}
+        <a class="unit-btn {% if destination == sttn_to %}active{% endif %}" href="{{ url_for('inbound', sttn_to=sttn_to) }}">{{ sttn_to or '—' }} ({{ count }})</a>
+        {% endfor %}
+    </div>
+    {% else %}
+    <p style="margin-bottom: 0;">
+        No list has been received yet. Open the Loaded In-Bound report on FOIS and send it with the Chrome extension.
+    </p>
+    {% endif %}
+    <p style="margin: 15px 0 0; font-size: 13px; color: #52606d;">
+        Distances saved: {{ distance_pairs }} station pairs ({{ distance_pairs_with_km }} with km, {{ distance_pairs - distance_pairs_with_km }} unknown to RBS). Saved pairs aren't looked up on RBS again.
+    </p>
+</div>
+
+<div class="card">
+    <h3 style="margin-top: 0;">Chrome Extension</h3>
+    <p>To send FOIS reports from another computer, install the extension in Chrome on that computer. You only need to do this once.</p>
+    <a class="btn-primary" style="display: inline-block; text-decoration: none; text-align: center;" href="{{ url_for('inbound_extension') }}">Download Extension</a>
+    <details style="margin-top: 15px;">
+        <summary style="cursor: pointer; font-weight: bold;">How to install and use it</summary>
+        <ol style="margin-bottom: 0;">
+            <li>Unzip the downloaded file into a folder you'll keep. Chrome keeps loading the extension from that folder, so don't delete it.</li>
+            <li>In Chrome, open <code>chrome://extensions</code> (type it into the address bar) and turn on <strong>Developer mode</strong>.</li>
+            <li>Click <strong>Load unpacked</strong> and choose the unzipped folder.</li>
+            <li>Click the puzzle-piece icon in the toolbar and pin <strong>Rakes Received Exporter</strong>.</li>
+            <li>Log in to FOIS, open the report and select <strong>Show All</strong>.</li>
+            <li>Click the extension icon, enter the API token (it's remembered after the first send) and click <strong>Send to dashboard</strong>. Ask your administrator for the token.</li>
+        </ol>
+        <p style="margin-bottom: 0;">To update the extension, unzip a new download over the same folder, then click the reload icon on its card in <code>chrome://extensions</code>.</p>
+    </details>
+</div>
+
+{% if rakes %}
+<div class="card" style="overflow-x: auto;">
+    <h3 style="margin-top: 0;">Rakes by Commodity, Plant or Pellet Agent, and Distance Left{% if destination %} ({{ destination }}){% endif %}</h3>
+    {% if report.rows %}
+    <table style="border-collapse: collapse; font-size: 14px; white-space: nowrap;">
+        <thead>
+            <tr style="background: #1f3a5f; color: white; text-align: left;">
+                <th style="padding: 8px 16px;">Commodity</th>
+                <th style="padding: 8px 16px;">Distance left</th>
+                {% for plant in plants %}
+                <th style="padding: 8px 16px; text-align: right;">{{ plant }}</th>
+                {% endfor %}
+                <th style="padding: 8px 16px; text-align: right;">Total</th>
+            </tr>
+        </thead>
+        {% for row in report.rows %}
+        <tbody>
+            {% for slab in row.slabs %}
+            <tr style="border-bottom: 1px solid #e4e7eb;">
+                {% if loop.first %}
+                <th scope="rowgroup" rowspan="{{ row.slabs|length + 1 }}" style="padding: 8px 16px; text-align: left; vertical-align: top; border-right: 1px solid #e4e7eb;">{{ row.commodity }}</th>
+                {% endif %}
+                <td style="padding: 8px 16px;">{{ slab.label }}</td>
+                {{ count_cells(slab) }}
+            </tr>
+            {% endfor %}
+            <tr style="background: #e8eef5; font-weight: bold; border-bottom: 2px solid #1f3a5f;">
+                <td style="padding: 8px 16px;">Total</td>
+                {{ count_cells(row.totals) }}
+            </tr>
+        </tbody>
+        {% endfor %}
+        <tfoot>
+            <tr style="background: #1f3a5f; color: white; font-weight: bold;">
+                <td style="padding: 8px 16px;" colspan="2">All commodities</td>
+                {% for plant in plants %}
+                <td style="padding: 8px 16px; text-align: right;">{{ report.totals.plants[plant] or '' }}{% if report.totals.stabled[plant] %} ({{ report.totals.stabled[plant] }} ST){% endif %}</td>
+                {% endfor %}
+                <td style="padding: 8px 16px; text-align: right;">{{ report.totals.total }}{% if report.totals.total_stabled %} ({{ report.totals.total_stabled }} ST){% endif %}</td>
+            </tr>
+        </tfoot>
+    </table>
+    {% else %}
+    <p>No rakes in this list are going to the plants or pellet agents.</p>
+    {% endif %}
+    <p style="margin: 12px 0 0; font-size: 13px; color: #52606d;">
+        Each cell shows all rakes, with the stabled ones (status ST) in brackets. For example, "5 (2 ST)" is 5 rakes, 2 of them stabled.
+        Km left is the goods distance from the current location to the destination on the Railways' Rates Branch System.
+        It's available for {{ rakes_with_distance }} of {{ rakes|length }} rakes in the list; "Unknown" means it hasn't been looked up yet or the site doesn't know that location.    </p>
+</div>
+
+<div class="card" style="overflow-x: auto;">
+    <table style="width: 100%; border-collapse: collapse; font-size: 13px; white-space: nowrap;">
+        <thead>
+            <tr style="background: #1f3a5f; color: white; text-align: left;">
+                <th style="padding: 8px;">Rake ID</th>
+                <th style="padding: 8px;">Load Name</th>
+                <th style="padding: 8px;">From</th>
+                <th style="padding: 8px;">To</th>
+                <th style="padding: 8px;">Commodity</th>
+                <th style="padding: 8px;">Units</th>
+                <th style="padding: 8px;">Current Location</th>
+                <th style="padding: 8px; text-align: right;">Km Left</th>
+                <th style="padding: 8px;">Status</th>
+                <th style="padding: 8px;">Status Time</th>
+                <th style="padding: 8px;">Dept Time</th>
+                <th style="padding: 8px;">Transit Time</th>
+                <th style="padding: 8px;">Expected Arrival</th>
+                <th style="padding: 8px;">Loco No.</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for rake in rakes %}
+            <tr style="border-bottom: 1px solid #e4e7eb;{% if rake.stabled %} background: #fef3f2;{% endif %}">
+                <td style="padding: 8px;">{{ rake.rake_id or '' }}</td>
+                <td style="padding: 8px;">{{ rake.load_name or '' }}</td>
+                <td style="padding: 8px;">{{ rake.sttn_from or '' }}</td>
+                <td style="padding: 8px;">{{ rake.sttn_to or '' }}</td>
+                <td style="padding: 8px;">{{ rake.commodity_name }}</td>
+                <td style="padding: 8px;">{{ rake.totl_unts or '' }}</td>
+                <td style="padding: 8px;">{{ rake.crnt_locn or '' }}</td>
+                <td style="padding: 8px; text-align: right;">{{ rake.distance_km|round|int if rake.distance_km is not none else '—' }}</td>
+                <td style="padding: 8px;{% if rake.stabled %} color: #b42318; font-weight: bold;{% endif %}">{{ rake.stts_code or '' }}{% if rake.stabled %} (stabled){% endif %}</td>
+                <td style="padding: 8px;">{{ rake.stts_time or '' }}</td>
+                <td style="padding: 8px;">{{ rake.dept_time or '' }}</td>
+                <td style="padding: 8px;">{{ rake.transit_time or '' }}</td>
+                <td style="padding: 8px;">{{ rake.expd_arvl_time or '' }}</td>
+                <td style="padding: 8px;">{{ rake.loco_no or '' }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+
+{% endblock %}

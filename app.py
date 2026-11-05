@@ -1,14 +1,17 @@
 from flask import Flask, Response, render_template, request, redirect, send_file, jsonify
 import pandas as pd
 import plotly.graph_objs as go
-import hmac, os, io, shutil
+import hmac, math, os, io, re, shutil, zipfile
+from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import create_engine, text, Column, Integer, String, Float, DateTime, UniqueConstraint
+from sqlalchemy import create_engine, func, text, Column, Integer, String, Float, DateTime, UniqueConstraint
 from sqlalchemy.engine import URL
 from sqlalchemy.orm import declarative_base
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.dialects.sqlite import insert
 from sqlalchemy.exc import IntegrityError
+
+from inbound_exports import build_excel, build_pdf
 
 # ------------------ APP SETUP ------------------
 
@@ -34,13 +37,18 @@ def data_path(filename):
 APP_USERNAME = os.environ.get("APP_USERNAME", "admin")
 APP_PASSWORD = os.environ.get("APP_PASSWORD")
 
+# Lets the Chrome extension import rake data without the site password.
+# Imports are refused until this is set.
+API_TOKEN = os.environ.get("API_TOKEN")
+
 # The Dockerfile sets REQUIRE_AUTH=1 so a deployment can't go public without a password.
 if os.environ.get("REQUIRE_AUTH") == "1" and not APP_PASSWORD:
     raise RuntimeError("APP_PASSWORD must be set when REQUIRE_AUTH=1")
 
 @app.before_request
 def require_login():
-    if not APP_PASSWORD or request.endpoint == "healthz":
+    # The import endpoints check API_TOKEN themselves.
+    if not APP_PASSWORD or request.endpoint in ("healthz", "import_rakes", "import_inbound", "import_distances"):
         return None
 
     auth = request.authorization
@@ -83,6 +91,62 @@ class Rake(Base):
     __table_args__ = (
         UniqueConstraint("received_time", "sttn_from", "sttn_to","cmdt","rake_type","dispatched_time", name="uq_rake_time_to_from_cmdt_type"),
     )
+
+class InboundRake(Base):
+    """One row of a FOIS Loaded In-Bound report. Each import adds a new list; times stay as FOIS shows them."""
+    __tablename__ = "inbound_rakes"
+
+    id = Column(Integer, primary_key=True)
+    imported_at = Column(DateTime, index=True, nullable=False)
+
+    crnt_zone = Column(String)
+    crnt_dvsn = Column(String)
+    crnt_locn = Column(String)
+    stts_code = Column(String)
+    stts_time = Column(String)
+    sttn_from = Column(String)
+    sttn_to = Column(String, index=True)
+    line_no = Column(String)
+    cc = Column(String)
+    load_name = Column(String)
+    rake_id = Column(String)
+    load_type = Column(String)
+    totl_unts = Column(String)
+    eight_w = Column(String)
+    loaded_empty = Column(String)
+    cmdt = Column(String)
+    cnsr = Column(String)
+    cnsg = Column(String)
+    ldng_time = Column(String)
+    dept_time = Column(String)
+    transit_time = Column(String)
+    loco_no = Column(String)
+    loco_type = Column(String)
+    expd_arvl_time = Column(String)
+
+class RailDistance(Base):
+    """Goods distance from a station to a plant yard, looked up once on the Railways' RBS site by
+    the Chrome extension. km is empty when RBS doesn't know the station."""
+    __tablename__ = "rail_distances"
+
+    from_code = Column(String, primary_key=True)
+    to_code = Column(String, primary_key=True)
+    km = Column(Float)
+    fetched_at = Column(DateTime, nullable=False)
+
+# FOIS heading (lower case, without spaces, dots or underscores) -> InboundRake column
+INBOUND_HEADINGS = {
+    "crntzone": "crnt_zone", "crntdvsn": "crnt_dvsn", "crntlocn": "crnt_locn",
+    "sttscode": "stts_code", "sttstime": "stts_time", "sttnfrom": "sttn_from",
+    "sttnto": "sttn_to", "lineno": "line_no", "cc": "cc", "loadname": "load_name",
+    "rakeid": "rake_id", "loadtype": "load_type", "totlunts": "totl_unts",
+    "8w": "eight_w", "l/e": "loaded_empty", "cmdt": "cmdt", "cnsr": "cnsr",
+    "cnsg": "cnsg", "ldngtime": "ldng_time", "depttime": "dept_time",
+    "transittime": "transit_time", "locono": "loco_no", "locotype": "loco_type",
+    "expdarvltime": "expd_arvl_time",
+}
+
+IST = timezone(timedelta(hours=5, minutes=30))
 
 engine = create_engine(URL.create("sqlite", database=data_path("rake_data.db")))
 Base.metadata.create_all(engine)
@@ -150,6 +214,112 @@ def get_station_display_name(station_code):
         return station_code
     return station_mappings.get(station_code, station_code)
 
+# ------------------ PLANTS ------------------
+
+PLANTS = ["BSP", "DSP", "RSP", "BSL", "ISP"]
+
+# Destination yard -> plant
+DESTINATION_PLANTS = {
+    "BSCS": "BSL",
+    "BSPC": "BSP",
+    "DSEY": "DSP",
+    "IISD": "ISP",
+    "BCME": "ISP",
+    "HSPG": "RSP",
+    "NHSB": "RSP",
+}
+
+# In-Bound report only. The Rakes Received dashboard counts just DESTINATION_PLANTS.
+PELLET_AGENTS = ["PMRN", "MOMG", "GFMK", "SSPL", "NKKH"]
+INBOUND_COLUMNS = [*PLANTS, *PELLET_AGENTS]
+INBOUND_DESTINATIONS = {**DESTINATION_PLANTS, **{agent: agent for agent in PELLET_AGENTS}}
+
+# ------------------ RAIL DISTANCE ------------------
+
+STABLED_STATUS = "ST"  # STTS CODE of a stabled rake
+SLAB_KM = 50  # Width of each distance slab
+UNKNOWN_SLAB = "Unknown"
+MAX_RAIL_KM = 10000
+
+def station_code(value):
+    """A clean station code, or None if the value isn't one. RBS codes are up to 4 characters."""
+    code = (value or "").strip().upper() if isinstance(value, str) else ""
+    return code if re.fullmatch(r"[A-Z0-9]{1,4}", code) else None
+
+def missing_distance_pairs(rakes, session):
+    """(station, yard) pairs for rakes going to the plants or agents that have never been looked up."""
+    known = set(session.query(RailDistance.from_code, RailDistance.to_code).all())
+    pairs = set()
+    for rake in rakes:
+        pair = (station_code(rake.crnt_locn), station_code(rake.sttn_to))
+        if all(pair) and pair[1] in INBOUND_DESTINATIONS and pair[0] != pair[1] and pair not in known:
+            pairs.add(pair)
+    return sorted(pairs)
+
+def distance_left_km(rake, distances):
+    """Km left for a rake using {(station, yard): km}, or None if it isn't known."""
+    start, end = station_code(rake.crnt_locn), station_code(rake.sttn_to)
+    if not start or not end:
+        return None
+    return 0 if start == end else distances.get((start, end))
+
+def slab_start(km):
+    """Where a distance's slab starts, so 50 km is in the slab starting at 50.
+    Unknown distances sort after every slab."""
+    return math.inf if km is None else int(km) // SLAB_KM * SLAB_KM
+
+def slab_label(start):
+    return UNKNOWN_SLAB if start == math.inf else f"{start}-{start + SLAB_KM} km"
+
+def commodity_name(code):
+    """The readable name from the commodity mappings, or the code if there isn't one."""
+    code = (code or "").strip().upper()
+    return commodity_mappings.get(code, code) or "—"
+
+def is_stabled(rake):
+    return (rake.stts_code or "").strip().upper() == STABLED_STATUS
+
+def counts_line(counts):
+    """Per-plant counts plus overall totals, from {"rakes": {plant: n}, "stabled": {plant: n}}."""
+    return {
+        "plants": counts["rakes"],
+        "stabled": counts["stabled"],
+        "total": sum(counts["rakes"].values()),
+        "total_stabled": sum(counts["stabled"].values()),
+    }
+
+def add_counts(lines):
+    """Add up counts_line() results, plant by plant."""
+    return counts_line({
+        "rakes": {plant: sum(line["plants"][plant] for line in lines) for plant in INBOUND_COLUMNS},
+        "stabled": {plant: sum(line["stabled"][plant] for line in lines) for plant in INBOUND_COLUMNS},
+    })
+
+def commodity_plant_report(rakes):
+    """Count rakes and stabled rakes by commodity, distance slab and plant or agent, largest commodity first."""
+    counts = {}
+    for rake in rakes:
+        plant = INBOUND_DESTINATIONS[rake.sttn_to.strip().upper()]
+        slabs = counts.setdefault(commodity_name(rake.cmdt), {})
+        slab = slabs.setdefault(slab_start(rake.distance_km), {
+            "rakes": dict.fromkeys(INBOUND_COLUMNS, 0),
+            "stabled": dict.fromkeys(INBOUND_COLUMNS, 0),
+        })
+        slab["rakes"][plant] += 1
+        slab["stabled"][plant] += is_stabled(rake)
+
+    report = []
+    for commodity, slabs in counts.items():
+        # Only slabs with rakes are in the dict, so empty ones never appear.
+        lines = [{"label": slab_label(start), **counts_line(slabs[start])} for start in sorted(slabs)]
+        report.append({"commodity": commodity, "slabs": lines, "totals": add_counts(lines)})
+    report.sort(key=lambda row: (-row["totals"]["total"], row["commodity"]))
+
+    return {
+        "rows": report,
+        "totals": add_counts([row["totals"] for row in report]),
+    }
+
 # ------------------ CLEANING ------------------
 
 def clean_data(df):
@@ -197,22 +367,13 @@ def clean_data(df):
     # ------------------ PATCHED sttn_to LOGIC ------------------
 
     # Keep only valid destinations
-    valid_destinations = ["BSCS","BSPC","DSEY","IISD","BCME","HSPG","NHSB"]
-    df = df[df["sttn_to"].isin(valid_destinations)]
+    df = df[df["sttn_to"].isin(DESTINATION_PLANTS)]
 
     clean_sttn_from = ["BNDM","DSPY"]
     df = df[~df["sttn_from"].isin(clean_sttn_from)]
 
     # Standardize destination codes
-    df["sttn_to"] = df["sttn_to"].replace({
-        "BSCS": "BSL",
-        "BSPC": "BSP",
-        "DSEY": "DSP",
-        "IISD": "ISP",
-        "BCME": "ISP",
-        "HSPG": "RSP",
-        "NHSB": "RSP"
-    })
+    df["sttn_to"] = df["sttn_to"].replace(DESTINATION_PLANTS)
 
     # Drop invalid rows
     df = df.dropna(subset=["received_time", "transit_time_hrs"])
@@ -322,6 +483,111 @@ def query_to_df(rows):
     # df["commodity"] = df["commodity"].apply(get_commodity_display_name)
 
     return df
+# ------------------ CHROME EXTENSION IMPORT ------------------
+
+def api_token_valid():
+    auth = request.authorization
+    token = auth.token if auth and auth.type == "bearer" else None
+    return bool(API_TOKEN and token and hmac.compare_digest(token.encode(), API_TOKEN.encode()))
+
+def read_import_request():
+    """Check the API token and read {"columns": [...], "rows": [[...], ...]} from the request.
+    Returns (data, None), or (None, error response)."""
+    if not api_token_valid():
+        return None, (jsonify(error="Invalid or missing API token"), 401)
+
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict) or not data.get("columns") or not data.get("rows"):
+        return None, (jsonify(error="Expected JSON with columns and rows"), 400)
+    return data, None
+
+@app.route("/api/rakes", methods=["POST"])
+def import_rakes():
+    """Import a Rakes Received table."""
+    data, error = read_import_request()
+    if error:
+        return error
+
+    try:
+        df_raw = pd.DataFrame(data["rows"], columns=data["columns"])
+        df_clean = clean_data(df_raw)
+    except (KeyError, TypeError, ValueError) as e:
+        return jsonify(error=f"Could not read the table: {e}"), 400
+
+    inserted, skipped = insert_cleaned_data(df_clean)
+    return jsonify(received=len(df_raw), inserted=inserted, skipped=skipped)
+
+@app.route("/api/inbound", methods=["POST"])
+def import_inbound():
+    """Save a Loaded In-Bound table as the latest list of rakes on the way."""
+    data, error = read_import_request()
+    if error:
+        return error
+
+    columns = data["columns"]
+    rows = data["rows"]
+    if not isinstance(columns, list) or not isinstance(rows, list):
+        return jsonify(error="Expected JSON with columns and rows"), 400
+
+    fields = [INBOUND_HEADINGS.get(re.sub(r"[\s._]", "", str(c).lower())) for c in columns]
+    if "rake_id" not in fields or "sttn_to" not in fields:
+        return jsonify(error="Could not read the table: RAKE ID and STTN TO are required"), 400
+
+    imported_at = datetime.now(IST).replace(tzinfo=None)
+    records = [
+        InboundRake(imported_at=imported_at, **{f: v for f, v in zip(fields, row) if f})
+        for row in rows
+        if isinstance(row, list) and len(row) == len(columns)
+    ]
+    if not records:
+        return jsonify(error="The table has no usable rows"), 400
+
+    session = SessionDB()
+    try:
+        missing = missing_distance_pairs(records, session)
+        session.add_all(records)
+        session.commit()
+    finally:
+        session.close()
+
+    return jsonify(
+        received=len(rows),
+        inserted=len(records),
+        missing_distances=[{"from": start, "to": end} for start, end in missing],
+    )
+
+@app.route("/api/distances", methods=["POST"])
+def import_distances():
+    """Save distances the extension looked up: {"distances": [{"from", "to", "km"}, ...]}.
+    An empty km means RBS doesn't know the station, so it won't be looked up again."""
+    if not api_token_valid():
+        return jsonify(error="Invalid or missing API token"), 401
+
+    data = request.get_json(silent=True)
+    distances = data.get("distances") if isinstance(data, dict) else None
+    if not isinstance(distances, list):
+        return jsonify(error="Expected JSON with distances"), 400
+
+    fetched_at = datetime.now(IST).replace(tzinfo=None)
+    saved = 0
+    session = SessionDB()
+    try:
+        for item in distances:
+            if not isinstance(item, dict):
+                continue
+            start, end, km = station_code(item.get("from")), station_code(item.get("to")), item.get("km")
+            km_valid = km is None or (
+                isinstance(km, (int, float)) and not isinstance(km, bool) and 0 <= km <= MAX_RAIL_KM
+            )
+            if start and end and km_valid:
+                session.merge(RailDistance(from_code=start, to_code=end, km=km, fetched_at=fetched_at))
+                saved += 1
+        session.commit()
+    finally:
+        session.close()
+
+    return jsonify(saved=saved)
+
 # ------------------ NEW: API ENDPOINTS FOR DYNAMIC FILTERS ------------------
 
 @app.route("/api/get_filters", methods=["POST"])
@@ -400,6 +666,93 @@ def healthz():
 @app.route("/")
 def index():
     return redirect("/dashboard")
+
+def inbound_data(destination):
+    """Everything the In-Bound page and its downloads show: the latest list's rakes going to the
+    plants and pellet agents. Rakes to other destinations stay saved but aren't shown."""
+    session = SessionDB()
+    try:
+        imported_at = session.query(func.max(InboundRake.imported_at)).scalar()
+        latest = session.query(InboundRake).filter(
+            InboundRake.imported_at == imported_at,
+            func.upper(func.trim(InboundRake.sttn_to)).in_(list(INBOUND_DESTINATIONS)),
+        )
+        counts = (
+            latest.with_entities(InboundRake.sttn_to, func.count())
+            .group_by(InboundRake.sttn_to)
+            .order_by(InboundRake.sttn_to)
+            .all()
+        )
+        if destination:
+            latest = latest.filter(InboundRake.sttn_to == destination)
+        rakes = latest.order_by(InboundRake.id).all()
+        distances = {(d.from_code, d.to_code): d.km for d in session.query(RailDistance).all()}
+    finally:
+        session.close()
+
+    for rake in rakes:
+        rake.distance_km = distance_left_km(rake, distances)
+        rake.commodity_name = commodity_name(rake.cmdt)
+        rake.stabled = is_stabled(rake)
+
+    return {
+        "rakes": rakes,
+        "report": commodity_plant_report(rakes),
+        "plants": INBOUND_COLUMNS,
+        "distance_pairs": len(distances),
+        "distance_pairs_with_km": sum(km is not None for km in distances.values()),
+        "rakes_with_distance": sum(rake.distance_km is not None for rake in rakes),
+        "stabled_count": sum(rake.stabled for rake in rakes),
+        "counts": counts,
+        "total": sum(count for _, count in counts),
+        "destination": destination,
+        "imported_at": imported_at,
+    }
+
+@app.route("/inbound")
+def inbound():
+    """Show the most recently imported Loaded In-Bound list."""
+    return render_template("inbound.html", **inbound_data(request.args.get("sttn_to", "")))
+
+def inbound_download(build, extension, mimetype):
+    """Send the latest In-Bound report as a file, following the page's destination filter."""
+    data = inbound_data(request.args.get("sttn_to", ""))
+    if not data["imported_at"]:
+        return "No In-Bound list has been received yet.", 404
+
+    parts = ["inbound_report", station_code(data["destination"]), data["imported_at"].strftime("%Y%m%d_%H%M")]
+    return send_file(
+        io.BytesIO(build(data)),
+        mimetype=mimetype,
+        as_attachment=True,
+        download_name="_".join(filter(None, parts)) + extension,
+    )
+
+@app.route("/inbound/report.xlsx")
+def inbound_excel():
+    return inbound_download(
+        build_excel, ".xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+
+@app.route("/inbound/report.pdf")
+def inbound_pdf():
+    return inbound_download(build_pdf, ".pdf", "application/pdf")
+
+@app.route("/inbound/extension.zip")
+def inbound_extension():
+    """Send the Chrome extension, with manifest.json at the top level so Load unpacked accepts it."""
+    folder = os.path.join(BASE_DIR, "chrome_extension")
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+        for name in sorted(os.listdir(folder)):
+            archive.write(os.path.join(folder, name), name)
+    buffer.seek(0)
+    return send_file(
+        buffer,
+        mimetype="application/zip",
+        as_attachment=True,
+        download_name="rakes_received_extension.zip",
+    )
 
 @app.route("/upload", methods=["GET", "POST"])
 def upload():

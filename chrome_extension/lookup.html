@@ -1,0 +1,21 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Looking up rail distances</title>
+  <style>
+    body { max-width: 560px; margin: 40px auto; padding: 0 16px; font: 16px system-ui, sans-serif; color: #1f2933; background: #fff; }
+    h1 { font-size: 20px; }
+    progress { width: 100%; height: 14px; }
+    .error { color: #b42318; }
+    .success { color: #05603a; }
+  </style>
+</head>
+<body>
+  <h1>Looking up rail distances</h1>
+  <p id="status">Starting...</p>
+  <progress id="progress" value="0" max="1"></progress>
+  <p>This reads each new station's goods distance from the Railways' Rates Branch System. Keep this tab open until it finishes. If you close it, the rest will be looked up the next time you send the report.</p>
+  <script src="lookup.js"></script>
+</body>
+</html>
