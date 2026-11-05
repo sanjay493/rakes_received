@@ -2,6 +2,7 @@ from flask import Flask, Response, render_template, request, redirect, send_file
 import pandas as pd
 import plotly.graph_objs as go
 import hmac, math, os, io, re, shutil, zipfile
+from collections import Counter
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import create_engine, func, text, Column, Integer, String, Float, DateTime, UniqueConstraint
@@ -288,6 +289,57 @@ def counts_line(counts):
         "total_stabled": sum(counts["stabled"].values()),
     }
 
+def loading_date(value):
+    """(sort key, column label) for an LDNG TIME. Dates read day first; other text keeps its own column."""
+    text = (value or "").strip()
+    if not text:
+        return (2, ""), "No date"
+    match = re.match(r"(\d{1,2})[-/.](\d{1,2}|[A-Za-z]{3})[-/.](\d{2,4})\b", text)
+    if match:
+        day, month, year = match.groups()
+        month_format = "%b" if month.isalpha() else "%m"
+        year_format = "%Y" if len(year) == 4 else "%y"
+        try:
+            date = datetime.strptime(f"{day}-{month}-{year}", f"%d-{month_format}-{year_format}").date()
+            return (0, date.isoformat()), date.strftime("%d-%m")
+        except ValueError:
+            pass
+    first_word = text.split()[0]
+    return (1, first_word), first_word
+
+def route_date_report(rakes):
+    """Count rakes by source, destination and loading date. Dates are columns, oldest first."""
+    counts = {}
+    labels = {}
+    for rake in rakes:
+        source = (rake.sttn_from or "").strip().upper() or "\u2014"
+        destination = rake.sttn_to.strip().upper()
+        key, label = loading_date(rake.ldng_time)
+        labels[key] = label
+        counts.setdefault((source, destination), Counter())[key] += 1
+
+    keys = sorted(labels)
+    rows = [
+        {
+            "source": source,
+            "destination": destination,
+            "counts": [dates[key] for key in keys],
+            "total": sum(dates.values()),
+        }
+        for (source, destination), dates in sorted(counts.items())
+    ]
+    return {
+        "dates": [labels[key] for key in keys],
+        "rows": rows,
+        "totals": [sum(row["counts"][index] for row in rows) for index in range(len(keys))],
+        "total": len(rakes),
+    }
+
+def source_text(sources):
+    """Source stations with their rake counts, most rakes first: "BKSC (3), JSG (1)"."""
+    ordered = sorted(sources.items(), key=lambda item: (-item[1], item[0]))
+    return ", ".join(f"{station} ({count})" for station, count in ordered)
+
 def add_counts(lines):
     """Add up counts_line() results, plant by plant."""
     return counts_line({
@@ -304,14 +356,21 @@ def commodity_plant_report(rakes):
         slab = slabs.setdefault(slab_start(rake.distance_km), {
             "rakes": dict.fromkeys(INBOUND_COLUMNS, 0),
             "stabled": dict.fromkeys(INBOUND_COLUMNS, 0),
+            "sources": Counter(),
         })
         slab["rakes"][plant] += 1
         slab["stabled"][plant] += is_stabled(rake)
+        source = (rake.sttn_from or "").strip().upper()
+        if source:
+            slab["sources"][source] += 1
 
     report = []
     for commodity, slabs in counts.items():
         # Only slabs with rakes are in the dict, so empty ones never appear.
-        lines = [{"label": slab_label(start), **counts_line(slabs[start])} for start in sorted(slabs)]
+        lines = [
+            {"label": slab_label(start), "sources": source_text(slabs[start]["sources"]), **counts_line(slabs[start])}
+            for start in sorted(slabs)
+        ]
         report.append({"commodity": commodity, "slabs": lines, "totals": add_counts(lines)})
     report.sort(key=lambda row: (-row["totals"]["total"], row["commodity"]))
 
@@ -698,6 +757,7 @@ def inbound_data(destination):
     return {
         "rakes": rakes,
         "report": commodity_plant_report(rakes),
+        "routes": route_date_report(rakes),
         "plants": INBOUND_COLUMNS,
         "distance_pairs": len(distances),
         "distance_pairs_with_km": sum(km is not None for km in distances.values()),

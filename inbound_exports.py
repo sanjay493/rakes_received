@@ -20,6 +20,7 @@ NOTES = [
     'Each plant and pellet agent shows all rakes, and how many of them are stabled (status ST). Stabled rakes are included in the rake count.',
     "Km left is the goods distance from the current location to the destination on the Railways' Rates Branch System.",
     '"Unknown" means the distance has not been looked up yet or the site does not know that location.',
+    "Source stations are the STTN FROM of the rakes in that row, with the number of rakes in brackets.",
 ]
 
 # (heading, value for a rake, width in the PDF in points)
@@ -86,7 +87,7 @@ def add_report_sheet(workbook, data):
     sheet = workbook.active
     sheet.title = "Commodity Report"
     plants = data["plants"]
-    columns = 2 + 2 * (len(plants) + 1)
+    columns = 2 + 2 * (len(plants) + 1) + 1  # The last one is the source stations
     title, summary = title_lines(data)
 
     put_text(sheet, 1, 1, title).font = Font(bold=True, size=14)
@@ -94,7 +95,7 @@ def add_report_sheet(workbook, data):
 
     # Two header rows: each plant spans its Rakes and ST columns.
     top, sub = 4, 5
-    for column, heading in ((1, "Commodity"), (2, "Distance Left")):
+    for column, heading in ((1, "Commodity"), (2, "Distance Left"), (columns, "Source Stations (rakes)")):
         sheet.cell(row=top, column=column, value=heading)
         sheet.merge_cells(start_row=top, end_row=sub, start_column=column, end_column=column)
     for index, name in enumerate([*plants, "Total"]):
@@ -114,6 +115,7 @@ def add_report_sheet(workbook, data):
             put_text(sheet, row, 1, commodity["commodity"]).font = Font(bold=True)
             put_text(sheet, row, 2, slab["label"])
             put_count_line(sheet, row, 3, slab, plants)
+            put_text(sheet, row, columns, slab["sources"]).alignment = Alignment(wrap_text=True, vertical="top")
             row += 1
         put_text(sheet, row, 1, commodity["commodity"])
         put_text(sheet, row, 2, "Total")
@@ -143,7 +145,37 @@ def add_report_sheet(workbook, data):
     sheet.column_dimensions["B"].width = 15
     for column in range(3, columns + 1):
         sheet.column_dimensions[get_column_letter(column)].width = 7
+    sheet.column_dimensions[get_column_letter(columns)].width = 45
     sheet.freeze_panes = sheet.cell(row=sub + 1, column=3)
+
+
+def add_route_sheet(workbook, data):
+    sheet = workbook.create_sheet("Source to Destination")
+    routes = data["routes"]
+    columns = 3 + len(routes["dates"])
+    for column, heading in enumerate(["Source", "Destination", *routes["dates"], "Total"], 1):
+        put_text(sheet, 1, column, heading)
+    style_row(sheet, 1, columns, bold=True, fill=NAVY, color="FFFFFF")
+
+    row = 2
+    for route in routes["rows"]:
+        put_text(sheet, row, 1, route["source"])
+        put_text(sheet, row, 2, route["destination"])
+        for column, count in enumerate(route["counts"], 3):
+            sheet.cell(row=row, column=column, value=count or None)
+        sheet.cell(row=row, column=columns, value=route["total"]).font = Font(bold=True)
+        row += 1
+
+    if routes["rows"]:
+        put_text(sheet, row, 1, "All routes")
+        for column, count in enumerate(routes["totals"], 3):
+            sheet.cell(row=row, column=column, value=count or None)
+        sheet.cell(row=row, column=columns, value=routes["total"])
+        style_row(sheet, row, columns, bold=True, fill=NAVY, color="FFFFFF")
+
+    for column in range(1, columns + 1):
+        sheet.column_dimensions[get_column_letter(column)].width = 13 if column < 3 else 8
+    sheet.freeze_panes = sheet.cell(row=2, column=3)
 
 
 def add_detail_sheet(workbook, data):
@@ -174,6 +206,7 @@ def add_detail_sheet(workbook, data):
 def build_excel(data):
     workbook = Workbook()
     add_report_sheet(workbook, data)
+    add_route_sheet(workbook, data)
     add_detail_sheet(workbook, data)
     output = io.BytesIO()
     workbook.save(output)
@@ -212,29 +245,31 @@ def text_cell(value, style):
 
 def report_table(data, styles):
     plants = data["plants"]
-    rows = [["Commodity", "Distance Left", *plants, "Total"]]
+    rows = [["Commodity", "Distance Left", *plants, "Total", "Source Stations (rakes)"]]
     commands = [
         ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor(f"#{NAVY}")),
         ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
         ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
         ("FONTSIZE", (0, 0), (-1, -1), 8),
-        ("ALIGN", (2, 0), (-1, -1), "RIGHT"),
+        ("ALIGN", (2, 0), (-2, -1), "RIGHT"),
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
         ("LINEBELOW", (0, 0), (-1, -1), 0.25, colors.HexColor("#CBD2D9")),
+        ("LEFTPADDING", (0, 0), (-1, -1), 3),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 3),
         ("TOPPADDING", (0, 0), (-1, -1), 2.5),
         ("BOTTOMPADDING", (0, 0), (-1, -1), 2.5),
     ]
 
-    def add_line(first, second, line, *style):
+    def add_line(first, second, line, *style, sources=""):
         rows.append([first, second, *[count_text(line["plants"][p], line["stabled"][p]) for p in plants],
-                     count_text(line["total"], line["total_stabled"])])
+                     count_text(line["total"], line["total_stabled"]), text_cell(sources, styles["cell"])])
         for command in style:
             commands.append((command[0], (0, len(rows) - 1), (-1, len(rows) - 1), *command[1:]))
 
     for commodity in data["report"]["rows"]:
         for slab in commodity["slabs"]:
             # Repeated on each row, because a commodity can run over a page break.
-            add_line(text_cell(commodity["commodity"], styles["cell_bold"]), slab["label"], slab)
+            add_line(text_cell(commodity["commodity"], styles["cell_bold"]), slab["label"], slab, sources=slab["sources"])
         add_line(text_cell(commodity["commodity"], styles["cell_bold"]), "Total", commodity["totals"],
                  ("BACKGROUND", colors.HexColor(f"#{LIGHT}")), ("FONTNAME", "Helvetica-Bold"),
                  ("LINEBELOW", 0.75, colors.HexColor(f"#{NAVY}")))
@@ -243,8 +278,36 @@ def report_table(data, styles):
              ("BACKGROUND", colors.HexColor(f"#{NAVY}")), ("TEXTCOLOR", colors.white), ("FONTNAME", "Helvetica-Bold"))
 
     # Fits the 762 points inside the landscape A4 page frame; Total is wider for its bold figures.
-    table = Table(rows, colWidths=[110, 65] + [523 / len(plants)] * len(plants) + [64], repeatRows=1, hAlign="LEFT")
+    table = Table(rows, colWidths=[90, 60] + [420 / len(plants)] * len(plants) + [56, 136], repeatRows=1, hAlign="LEFT")
     table.setStyle(TableStyle(commands))
+    return table
+
+
+def route_table(data):
+    routes = data["routes"]
+    rows = [["Source", "Destination", *routes["dates"], "Total"]]
+    for route in routes["rows"]:
+        rows.append([route["source"], route["destination"], *[count or "" for count in route["counts"]], route["total"]])
+    rows.append(["All routes", "", *[count or "" for count in routes["totals"]], routes["total"]])
+    # Date columns share what is left of the 762 points inside the page frame.
+    date_width = min(45, 622 / len(routes["dates"]))
+    table = Table(rows, colWidths=[50, 50] + [date_width] * len(routes["dates"]) + [40], repeatRows=1, hAlign="LEFT")
+    table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor(f"#{NAVY}")),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("FONTSIZE", (0, 0), (-1, -1), 8),
+        ("ALIGN", (2, 0), (-1, -1), "RIGHT"),
+        ("LINEBELOW", (0, 0), (-1, -1), 0.25, colors.HexColor("#CBD2D9")),
+        ("LEFTPADDING", (0, 0), (-1, -1), 3),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 3),
+        ("TOPPADDING", (0, 0), (-1, -1), 2.5),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 2.5),
+        ("FONTNAME", (-1, 1), (-1, -1), "Helvetica-Bold"),
+        ("BACKGROUND", (0, -1), (-1, -1), colors.HexColor(f"#{NAVY}")),
+        ("TEXTCOLOR", (0, -1), (-1, -1), colors.white),
+        ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"),
+    ]))
     return table
 
 
@@ -291,6 +354,14 @@ def build_pdf(data):
         story.append(Paragraph("No rakes in this list are going to the plants or pellet agents.", styles["body"]))
     story.append(Spacer(1, 6))
     story.extend(Paragraph(escape(note), styles["note"]) for note in NOTES)
+    if data["routes"]["rows"]:
+        story.extend([
+            PageBreak(),
+            Paragraph("Rakes by Source, Destination and Loading Date", styles["heading"]),
+            route_table(data),
+            Spacer(1, 6),
+            Paragraph("Each date column (day-month) counts the rakes loaded that day, from LDNG TIME on FOIS.", styles["note"]),
+        ])
     story.extend([PageBreak(), Paragraph("Rake Details (stabled rakes are shaded, status ST)", styles["heading"])])
     story.append(detail_table(data, styles))
 

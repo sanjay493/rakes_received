@@ -69,6 +69,7 @@
                 <th style="padding: 8px 16px; text-align: right;">{{ plant }}</th>
                 {% endfor %}
                 <th style="padding: 8px 16px; text-align: right;">Total</th>
+                <th style="padding: 8px 16px;">Source Stations (rakes)</th>
             </tr>
         </thead>
         {% for row in report.rows %}
@@ -80,11 +81,13 @@
                 {% endif %}
                 <td style="padding: 8px 16px;">{{ slab.label }}</td>
                 {{ count_cells(slab) }}
+                <td style="padding: 8px 16px; white-space: normal; min-width: 240px;">{{ slab.sources }}</td>
             </tr>
             {% endfor %}
             <tr style="background: #e8eef5; font-weight: bold; border-bottom: 2px solid #1f3a5f;">
                 <td style="padding: 8px 16px;">Total</td>
                 {{ count_cells(row.totals) }}
+                <td></td>
             </tr>
         </tbody>
         {% endfor %}
@@ -95,6 +98,7 @@
                 <td style="padding: 8px 16px; text-align: right;">{{ report.totals.plants[plant] or '' }}{% if report.totals.stabled[plant] %} ({{ report.totals.stabled[plant] }} ST){% endif %}</td>
                 {% endfor %}
                 <td style="padding: 8px 16px; text-align: right;">{{ report.totals.total }}{% if report.totals.total_stabled %} ({{ report.totals.total_stabled }} ST){% endif %}</td>
+                <td></td>
             </tr>
         </tfoot>
     </table>
@@ -105,6 +109,46 @@
         Each cell shows all rakes, with the stabled ones (status ST) in brackets. For example, "5 (2 ST)" is 5 rakes, 2 of them stabled.
         Km left is the goods distance from the current location to the destination on the Railways' Rates Branch System.
         It's available for {{ rakes_with_distance }} of {{ rakes|length }} rakes in the list; "Unknown" means it hasn't been looked up yet or the site doesn't know that location.    </p>
+</div>
+
+<div class="card" style="overflow-x: auto;">
+    <h3 style="margin-top: 0;">Rakes by Source, Destination and Loading Date{% if destination %} ({{ destination }}){% endif %}</h3>
+    <table style="border-collapse: collapse; font-size: 14px; white-space: nowrap;">
+        <thead>
+            <tr style="background: #1f3a5f; color: white; text-align: left;">
+                <th style="padding: 8px 16px;">Source</th>
+                <th style="padding: 8px 16px;">Destination</th>
+                {% for date in routes.dates %}
+                <th style="padding: 8px 16px; text-align: right;">{{ date }}</th>
+                {% endfor %}
+                <th style="padding: 8px 16px; text-align: right;">Total</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for route in routes.rows %}
+            <tr style="border-bottom: 1px solid #e4e7eb;">
+                <td style="padding: 8px 16px;">{{ route.source }}</td>
+                <td style="padding: 8px 16px;">{{ route.destination }}</td>
+                {% for count in route.counts %}
+                <td style="padding: 8px 16px; text-align: right;">{{ count or '' }}</td>
+                {% endfor %}
+                <td style="padding: 8px 16px; text-align: right; font-weight: bold;">{{ route.total }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+        <tfoot>
+            <tr style="background: #1f3a5f; color: white; font-weight: bold;">
+                <td style="padding: 8px 16px;" colspan="2">All routes</td>
+                {% for count in routes.totals %}
+                <td style="padding: 8px 16px; text-align: right;">{{ count or '' }}</td>
+                {% endfor %}
+                <td style="padding: 8px 16px; text-align: right;">{{ routes.total }}</td>
+            </tr>
+        </tfoot>
+    </table>
+    <p style="margin: 12px 0 0; font-size: 13px; color: #52606d;">
+        Each date column (day-month) counts the rakes loaded that day, from LDNG TIME on FOIS.
+    </p>
 </div>
 
 <div class="card" style="overflow-x: auto;">
