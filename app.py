@@ -216,7 +216,7 @@ def get_station_display_name(station_code):
 
 # ------------------ PLANTS ------------------
 
-PLANTS = ["BSL", "BSP", "DSP", "ISP", "RSP"]
+PLANTS = ["BSP", "DSP", "RSP", "BSL", "ISP"]
 
 # Destination yard -> plant
 DESTINATION_PLANTS = {
@@ -296,15 +296,10 @@ def add_counts(lines):
     })
 
 def commodity_plant_report(rakes):
-    """Count rakes and stabled rakes by commodity, distance slab and plant or agent, largest commodity first.
-    Rakes going anywhere else are left out and only counted."""
+    """Count rakes and stabled rakes by commodity, distance slab and plant or agent, largest commodity first."""
     counts = {}
-    elsewhere = 0
     for rake in rakes:
-        plant = INBOUND_DESTINATIONS.get((rake.sttn_to or "").strip().upper())
-        if not plant:
-            elsewhere += 1
-            continue
+        plant = INBOUND_DESTINATIONS[rake.sttn_to.strip().upper()]
         slabs = counts.setdefault(commodity_name(rake.cmdt), {})
         slab = slabs.setdefault(slab_start(rake.distance_km), {
             "rakes": dict.fromkeys(INBOUND_COLUMNS, 0),
@@ -323,7 +318,6 @@ def commodity_plant_report(rakes):
     return {
         "rows": report,
         "totals": add_counts([row["totals"] for row in report]),
-        "elsewhere": elsewhere,
     }
 
 # ------------------ CLEANING ------------------
@@ -674,11 +668,15 @@ def index():
     return redirect("/dashboard")
 
 def inbound_data(destination):
-    """Everything the In-Bound page and its downloads show, for the latest list."""
+    """Everything the In-Bound page and its downloads show: the latest list's rakes going to the
+    plants and pellet agents. Rakes to other destinations stay saved but aren't shown."""
     session = SessionDB()
     try:
         imported_at = session.query(func.max(InboundRake.imported_at)).scalar()
-        latest = session.query(InboundRake).filter(InboundRake.imported_at == imported_at)
+        latest = session.query(InboundRake).filter(
+            InboundRake.imported_at == imported_at,
+            func.upper(func.trim(InboundRake.sttn_to)).in_(list(INBOUND_DESTINATIONS)),
+        )
         counts = (
             latest.with_entities(InboundRake.sttn_to, func.count())
             .group_by(InboundRake.sttn_to)

@@ -15,7 +15,7 @@
     <h2 style="margin-top: 0;">Loaded In-Bound Rakes</h2>
     {% if imported_at %}
     <p style="margin-bottom: 0;">
-        {{ total }} rakes in the list sent from FOIS on {{ imported_at.strftime('%d-%m-%Y %H:%M') }} IST.
+        {{ total }} rakes to the plants and pellet agents in the list sent from FOIS on {{ imported_at.strftime('%d-%m-%Y %H:%M') }} IST.
         {% if stabled_count %}<strong style="color: #b42318;">{{ stabled_count }} stabled{% if destination %} to {{ destination }}{% endif %} (status ST).</strong>{% endif %}
     </p>
     <div style="display: flex; gap: 10px; flex-wrap: wrap; margin-top: 15px;">
@@ -101,9 +101,7 @@
     <p style="margin: 12px 0 0; font-size: 13px; color: #52606d;">
         Each cell shows all rakes, with the stabled ones (status ST) in brackets. For example, "5 (2 ST)" is 5 rakes, 2 of them stabled.
         Km left is the goods distance from the current location to the destination on the Railways' Rates Branch System.
-        It's available for {{ rakes_with_distance }} of {{ rakes|length }} rakes in the list; "Unknown" means it hasn't been looked up yet or the site doesn't know that location.
-        {% if report.elsewhere %}{{ report.elsewhere }} rakes going to other destinations aren't in this table.{% endif %}
-    </p>
+        It's available for {{ rakes_with_distance }} of {{ rakes|length }} rakes in the list; "Unknown" means it hasn't been looked up yet or the site doesn't know that location.    </p>
 </div>
 
 <div class="card" style="overflow-x: auto;">
