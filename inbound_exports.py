@@ -17,7 +17,7 @@ STABLED_FILL = "FEF3F2"
 STABLED_TEXT = "B42318"
 
 NOTES = [
-    'Each plant shows all rakes, and how many of them are stabled (status ST). Stabled rakes are included in the rake count.',
+    'Each plant and pellet agent shows all rakes, and how many of them are stabled (status ST). Stabled rakes are included in the rake count.',
     "Km left is the goods distance from the current location to the destination on the Railways' Rates Branch System.",
     '"Unknown" means the distance has not been looked up yet or the site does not know that location.',
 ]
@@ -246,7 +246,8 @@ def report_table(data, styles):
     add_line("All commodities", "", data["report"]["totals"],
              ("BACKGROUND", colors.HexColor(f"#{NAVY}")), ("TEXTCOLOR", colors.white), ("FONTNAME", "Helvetica-Bold"))
 
-    table = Table(rows, colWidths=[130, 80] + [70] * (len(plants) + 1), repeatRows=1, hAlign="LEFT")
+    # Fits the 762 points inside the landscape A4 page frame; Total is wider for its bold figures.
+    table = Table(rows, colWidths=[110, 65] + [523 / len(plants)] * len(plants) + [64], repeatRows=1, hAlign="LEFT")
     table.setStyle(TableStyle(commands))
     return table
 
@@ -291,7 +292,7 @@ def build_pdf(data):
     if data["report"]["rows"]:
         story.append(report_table(data, styles))
     else:
-        story.append(Paragraph("No rakes in this list are going to the plants.", styles["body"]))
+        story.append(Paragraph("No rakes in this list are going to the plants or pellet agents.", styles["body"]))
     story.append(Spacer(1, 6))
     story.extend(Paragraph(escape(note), styles["note"]) for note in NOTES)
     story.extend([PageBreak(), Paragraph("Rake Details (stabled rakes are shaded, status ST)", styles["heading"])])

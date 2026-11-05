@@ -229,6 +229,11 @@ DESTINATION_PLANTS = {
     "NHSB": "RSP",
 }
 
+# In-Bound report only. The Rakes Received dashboard counts just DESTINATION_PLANTS.
+PELLET_AGENTS = ["PMRN", "MOMG", "GFMK", "SSPL", "NKKH"]
+INBOUND_COLUMNS = [*PLANTS, *PELLET_AGENTS]
+INBOUND_DESTINATIONS = {**DESTINATION_PLANTS, **{agent: agent for agent in PELLET_AGENTS}}
+
 # ------------------ RAIL DISTANCE ------------------
 
 STABLED_STATUS = "ST"  # STTS CODE of a stabled rake
@@ -242,12 +247,12 @@ def station_code(value):
     return code if re.fullmatch(r"[A-Z0-9]{1,4}", code) else None
 
 def missing_distance_pairs(rakes, session):
-    """(station, yard) pairs for rakes going to the plants that have never been looked up."""
+    """(station, yard) pairs for rakes going to the plants or agents that have never been looked up."""
     known = set(session.query(RailDistance.from_code, RailDistance.to_code).all())
     pairs = set()
     for rake in rakes:
         pair = (station_code(rake.crnt_locn), station_code(rake.sttn_to))
-        if all(pair) and pair[1] in DESTINATION_PLANTS and pair[0] != pair[1] and pair not in known:
+        if all(pair) and pair[1] in INBOUND_DESTINATIONS and pair[0] != pair[1] and pair not in known:
             pairs.add(pair)
     return sorted(pairs)
 
@@ -286,24 +291,24 @@ def counts_line(counts):
 def add_counts(lines):
     """Add up counts_line() results, plant by plant."""
     return counts_line({
-        "rakes": {plant: sum(line["plants"][plant] for line in lines) for plant in PLANTS},
-        "stabled": {plant: sum(line["stabled"][plant] for line in lines) for plant in PLANTS},
+        "rakes": {plant: sum(line["plants"][plant] for line in lines) for plant in INBOUND_COLUMNS},
+        "stabled": {plant: sum(line["stabled"][plant] for line in lines) for plant in INBOUND_COLUMNS},
     })
 
 def commodity_plant_report(rakes):
-    """Count rakes and stabled rakes by commodity, distance slab and plant, largest commodity first.
-    Rakes going anywhere other than the plants are left out and only counted."""
+    """Count rakes and stabled rakes by commodity, distance slab and plant or agent, largest commodity first.
+    Rakes going anywhere else are left out and only counted."""
     counts = {}
     elsewhere = 0
     for rake in rakes:
-        plant = DESTINATION_PLANTS.get((rake.sttn_to or "").strip().upper())
+        plant = INBOUND_DESTINATIONS.get((rake.sttn_to or "").strip().upper())
         if not plant:
             elsewhere += 1
             continue
         slabs = counts.setdefault(commodity_name(rake.cmdt), {})
         slab = slabs.setdefault(slab_start(rake.distance_km), {
-            "rakes": dict.fromkeys(PLANTS, 0),
-            "stabled": dict.fromkeys(PLANTS, 0),
+            "rakes": dict.fromkeys(INBOUND_COLUMNS, 0),
+            "stabled": dict.fromkeys(INBOUND_COLUMNS, 0),
         })
         slab["rakes"][plant] += 1
         slab["stabled"][plant] += is_stabled(rake)
@@ -695,7 +700,7 @@ def inbound_data(destination):
     return {
         "rakes": rakes,
         "report": commodity_plant_report(rakes),
-        "plants": PLANTS,
+        "plants": INBOUND_COLUMNS,
         "rakes_with_distance": sum(rake.distance_km is not None for rake in rakes),
         "stabled_count": sum(rake.stabled for rake in rakes),
         "counts": counts,

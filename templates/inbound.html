@@ -55,7 +55,7 @@
 
 {% if rakes %}
 <div class="card" style="overflow-x: auto;">
-    <h3 style="margin-top: 0;">Rakes by Commodity, Plant and Distance Left{% if destination %} ({{ destination }}){% endif %}</h3>
+    <h3 style="margin-top: 0;">Rakes by Commodity, Plant or Pellet Agent, and Distance Left{% if destination %} ({{ destination }}){% endif %}</h3>
     {% if report.rows %}
     <table style="border-collapse: collapse; font-size: 14px; white-space: nowrap;">
         <thead>
@@ -96,7 +96,7 @@
         </tfoot>
     </table>
     {% else %}
-    <p>No rakes in this list are going to the plants.</p>
+    <p>No rakes in this list are going to the plants or pellet agents.</p>
     {% endif %}
     <p style="margin: 12px 0 0; font-size: 13px; color: #52606d;">
         Each cell shows all rakes, with the stabled ones (status ST) in brackets. For example, "5 (2 ST)" is 5 rakes, 2 of them stabled.
