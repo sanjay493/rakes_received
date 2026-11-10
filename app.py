@@ -686,6 +686,7 @@ def import_inbound():
         missing_names = missing_station_codes(records, session)
         session.add_all(records)
         session.commit()
+        removed = delete_old_inbound_lists(session, imported_at)
     finally:
         session.close()
 
@@ -694,6 +695,7 @@ def import_inbound():
         inserted=len(records),
         missing_distances=[{"from": start, "to": end} for start, end in missing],
         missing_stations=missing_names,
+        old_rows_removed=removed,
     )
 
 @app.route("/api/distances", methods=["POST"])
@@ -851,6 +853,23 @@ def index():
 
 SAIL_CONSIGNEE = "SAIL"  # CNSG of rakes for SAIL, at the plants and at its stockyards
 SHARED_SOURCE_DAYS = 7
+
+INBOUND_KEEP_DAYS = 30  # Older lists are deleted; the All-India 7-day table needs only SHARED_SOURCE_DAYS
+
+def delete_old_inbound_lists(session, now):
+    """Delete Loaded In-Bound lists sent more than INBOUND_KEEP_DAYS days before now, except the latest list
+    and the latest all-India list, which the pages show however old they are. Returns the rows deleted."""
+    keep = {
+        session.query(func.max(InboundRake.imported_at)).scalar(),
+        session.query(func.max(InboundRake.imported_at)).filter(not_plant_list()).scalar(),
+    }
+    old = session.query(InboundRake).filter(InboundRake.imported_at < now - timedelta(days=INBOUND_KEEP_DAYS))
+    keep.discard(None)
+    if keep:
+        old = old.filter(InboundRake.imported_at.notin_(keep))
+    removed = old.delete(synchronize_session=False)
+    session.commit()
+    return removed
 
 def is_sail(cnsg):
     return (cnsg or "").strip().upper() == SAIL_CONSIGNEE
