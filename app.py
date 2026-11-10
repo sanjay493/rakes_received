@@ -277,13 +277,15 @@ def missing_distance_pairs(rakes, session):
     return sorted(pairs)
 
 def missing_station_codes(rakes, session):
-    """Source and destination codes of rakes going to the plants or agents that have no name in the
-    station mappings and have never been looked up on FOIS."""
+    """Codes with no name in the station mappings that have never been looked up on FOIS: the source and
+    destination of rakes to the plants or agents, and the source of any rake for consignee SAIL."""
     looked_up = {code for (code,) in session.query(StationLookup.code).all()}
     codes = set()
     for rake in rakes:
         if station_code(rake.sttn_to) in INBOUND_DESTINATIONS:
             codes.update(filter(None, (station_code(rake.sttn_from), station_code(rake.sttn_to))))
+        elif is_sail(rake.cnsg) and station_code(rake.sttn_from):
+            codes.add(station_code(rake.sttn_from))
     return sorted(code for code in codes if code not in station_mappings and code not in looked_up)
 
 MAX_STATION_NAME = 80
@@ -844,6 +846,134 @@ def healthz():
 @app.route("/")
 def index():
     return redirect("/dashboard")
+
+# ------------------ ALL-INDIA EN-ROUTE ------------------
+
+SAIL_CONSIGNEE = "SAIL"  # CNSG of rakes for SAIL, at the plants and at its stockyards
+SHARED_SOURCE_DAYS = 7
+
+def is_sail(cnsg):
+    return (cnsg or "").strip().upper() == SAIL_CONSIGNEE
+
+def party(code):
+    """A consigner or consignee code, with a dash for a blank one."""
+    return (code or "").strip().upper() or "\u2014"
+
+def loading_datetime(value):
+    """LDNG TIME as a datetime ("11-11-2026 03:05"), or None if it can't be read."""
+    text = (value or "").strip()
+    for size, pattern in ((16, "%d-%m-%Y %H:%M"), (10, "%d-%m-%Y")):
+        try:
+            return datetime.strptime(text[:size], pattern)
+        except ValueError:
+            pass
+    return None
+
+def not_plant_list():
+    """SQL condition for a rake going somewhere other than the plants and agents. A list with any such
+    rake is an all-India list, rather than one filtered to the SAIL plants."""
+    return ~func.upper(func.trim(func.coalesce(InboundRake.sttn_to, ""))).in_(list(INBOUND_DESTINATIONS))
+
+def party_report(rakes, key, other):
+    """Rakes per key party (consigner or consignee), most first, each with the other parties as
+    [(code, rakes)], most first."""
+    counts = {}
+    for rake in rakes:
+        counts.setdefault(party(key(rake)), Counter())[party(other(rake))] += 1
+    rows = [
+        {"code": code, "total": sum(others.values()), "others": sorted(others.items(), key=lambda kv: (-kv[1], kv[0]))}
+        for code, others in counts.items()
+    ]
+    rows.sort(key=lambda row: (-row["total"], row["code"]))
+    return rows
+
+def shared_source_report(session, latest_at):
+    """For each source station that loaded a rake for SAIL in the last SHARED_SOURCE_DAYS days, the rakes it
+    loaded for SAIL and for other consignees. Every list sent in that time counts, so rakes already
+    delivered still count; a rake in several lists is counted once, by Rake ID and loading time."""
+    end = latest_at.date()
+    start = end - timedelta(days=SHARED_SOURCE_DAYS - 1)
+    rows = (
+        session.query(InboundRake.rake_id, InboundRake.load_name, InboundRake.sttn_from,
+                      InboundRake.cnsg, InboundRake.ldng_time, InboundRake.imported_at)
+        .filter(InboundRake.imported_at >= datetime.combine(start, datetime.min.time()))
+        .all()
+    )
+    loadings = {}
+    first_list = None
+    for rake_id, load_name, sttn_from, cnsg, ldng_time, imported_at in rows:
+        first_list = min(first_list or imported_at, imported_at)
+        loaded = loading_datetime(ldng_time)
+        source = station_code(sttn_from)
+        if not loaded or not source or not start <= loaded.date() <= end:
+            continue
+        key = ((rake_id or "").strip() or (load_name or "").strip(), loaded, source)
+        loadings[key] = cnsg
+
+    sources = {}
+    for (_, _, source), cnsg in loadings.items():
+        line = sources.setdefault(source, {"sail": 0, "others": Counter()})
+        if is_sail(cnsg):
+            line["sail"] += 1
+        else:
+            line["others"][party(cnsg)] += 1
+
+    report = []
+    for source, line in sources.items():
+        if not line["sail"]:
+            continue  # Only sources that load for SAIL
+        others = sum(line["others"].values())
+        report.append({
+            "source": station_label(source),
+            "sail": line["sail"],
+            "others": others,
+            "total": line["sail"] + others,
+            "sail_share": round(100 * line["sail"] / (line["sail"] + others)),
+            "other_parties": sorted(line["others"].items(), key=lambda kv: (-kv[1], kv[0])),
+        })
+    report.sort(key=lambda row: (-row["total"], row["source"]))
+    return {
+        "rows": report,
+        "start": start,
+        "end": end,
+        "sail": sum(row["sail"] for row in report),
+        "others": sum(row["others"] for row in report),
+        "total": sum(row["total"] for row in report),
+        # History is complete only once lists go back to the start of the window.
+        "history_from": first_list.date() if first_list and first_list.date() > start else None,
+    }
+
+def enroute_data():
+    """The latest all-India list, by consigner and by consignee, and the shared-source table."""
+    session = SessionDB()
+    try:
+        latest_at = session.query(func.max(InboundRake.imported_at)).filter(not_plant_list()).scalar()
+        if not latest_at:
+            return {"imported_at": None}
+        rakes = (
+            session.query(InboundRake.cnsr, InboundRake.cnsg)
+            .filter(InboundRake.imported_at == latest_at)
+            .all()
+        )
+        shared = shared_source_report(session, latest_at)
+    finally:
+        session.close()
+
+    return {
+        "imported_at": latest_at,
+        "total": len(rakes),
+        "sail_total": sum(is_sail(cnsg) for _, cnsg in rakes),
+        "by_consigner": party_report(rakes, key=lambda r: r[0], other=lambda r: r[1]),
+        "by_consignee": party_report(rakes, key=lambda r: r[1], other=lambda r: r[0]),
+        "shared": shared,
+        "sail": SAIL_CONSIGNEE,
+        "days": SHARED_SOURCE_DAYS,
+    }
+
+@app.route("/enroute")
+def enroute():
+    """All-India en-route rakes from the latest all-India Loaded In-Bound list."""
+    return render_template("enroute.html", **enroute_data())
 
 def inbound_data(destination):
     """Everything the In-Bound page and its downloads show: the latest list's rakes going to the

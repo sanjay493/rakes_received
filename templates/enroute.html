@@ -1,0 +1,199 @@
+{% extends "base.html" %}
+
+{% macro chips(parties, highlight) %}
+<div class="chips">
+    {% for code, count in parties %}<span class="chip{% if code == highlight %} chip-sail{% endif %}">{{ code }} <b>{{ count }}</b></span>{% endfor %}
+</div>
+{% endmacro %}
+
+{% macro party_table(id, rows, heading, partner_heading) %}
+<input type="search" class="filter" data-table="{{ id }}" placeholder="Filter by code, e.g. SAIL" aria-label="Filter {{ heading }}">
+<div class="scroll-box">
+    <table class="party-table" id="{{ id }}">
+        <thead>
+            <tr>
+                <th>{{ heading }}</th>
+                <th class="num">Rakes</th>
+                <th>{{ partner_heading }} (rakes)</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in rows %}
+            <tr{% if row.code == sail %} class="row-sail"{% endif %} data-search="{{ row.code }} {% for code, _ in row.others %}{{ code }} {% endfor %}">
+                <th scope="row">{{ row.code }}</th>
+                <td class="num"><b>{{ row.total }}</b></td>
+                <td>{{ chips(row.others, sail) }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+        <tfoot>
+            <tr>
+                <td>All ({{ rows|length }})</td>
+                <td class="num">{{ total }}</td>
+                <td></td>
+            </tr>
+        </tfoot>
+    </table>
+</div>
+{% endmacro %}
+
+{% block content %}
+<style>
+    .scroll-box { max-height: 75vh; overflow: auto; border: 1px solid #e4e7eb; }
+    .scroll-box table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 13px; }
+    .scroll-box th, .scroll-box td { padding: 6px 8px; text-align: left; vertical-align: top; border-bottom: 1px solid #e4e7eb; }
+    .scroll-box thead th { position: sticky; top: 0; z-index: 2; background: #1f3a5f; color: white; }
+    .scroll-box tfoot td { position: sticky; bottom: 0; background: #1f3a5f; color: white; font-weight: bold; }
+    .scroll-box .num { text-align: right; white-space: nowrap; }
+    .party-table th[scope="row"] { white-space: nowrap; color: #1f3a5f; }
+    .party-table td:last-child { width: 70%; }
+    .row-sail th, .row-sail td { background: #fff8e1; }
+    .chips { display: flex; flex-wrap: wrap; gap: 4px 6px; }
+    .chip { background: #e8eef5; border-radius: 4px; padding: 1px 6px; white-space: nowrap; }
+    .chip-sail { background: #ffe082; font-weight: bold; }
+    .filter { max-width: 320px; margin: 0 0 10px; }
+    .summary { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
+    .summary div { background: #e8eef5; border-radius: 6px; padding: 8px 14px; }
+    .summary b { display: block; font-size: 20px; color: #1f3a5f; }
+    .note { margin: 10px 0 0; font-size: 13px; color: #52606d; }
+    .warn { background: #fff4e5; border-left: 4px solid #f57c00; padding: 8px 12px; border-radius: 4px; font-size: 13px; margin: 0 0 12px; }
+    .two-col { display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: 20px; }
+    .two-col > .card { margin-bottom: 0; min-width: 0; }
+    .share { color: #52606d; }
+    /* Shared sources on phones: a list instead of the table. */
+    .phone-only { display: none; }
+    @media (max-width: 700px) {
+        .desk-only { display: none; }
+        .phone-only { display: block; }
+        .two-col { grid-template-columns: 1fr; }
+        .party-table td:last-child { width: auto; }
+    }
+    .ss-card { border: 1px solid #e4e7eb; border-radius: 6px; padding: 8px 10px; margin-bottom: 8px; font-size: 14px; }
+    .ss-head { display: flex; justify-content: space-between; gap: 8px; font-weight: bold; color: #1f3a5f; margin-bottom: 4px; }
+    .ss-counts { margin-bottom: 4px; }
+</style>
+
+<div class="card">
+    <h2 style="margin-top: 0;">All-India En-route Loaded Rakes</h2>
+    {% if imported_at %}
+    <p style="margin: 0;">As on {{ imported_at.strftime('%d-%m-%Y %H:%M') }} IST, when the all-India list was received from FOIS.</p>
+    <div class="summary">
+        <div><b>{{ total }}</b>rakes en-route</div>
+        <div><b>{{ sail_total }}</b>for consignee {{ sail }}</div>
+        <div><b>{{ by_consigner|length }}</b>consigners</div>
+        <div><b>{{ by_consignee|length }}</b>consignees</div>
+    </div>
+    {% else %}
+    <p style="margin-bottom: 0;">
+        No all-India list has been received yet. Open the Loaded In-Bound Rake report on FOIS e-Customer
+        (InBundLRake.jsp), load the all-India list, select Show All, and send it with the Chrome extension.
+    </p>
+    {% endif %}
+    <p class="note">
+        Send the all-India list with the Chrome extension, the same way as the Loaded In-Bound report. It also
+        updates the <a href="{{ url_for('inbound') }}">In-Bound</a> page, which shows only the rakes to the SAIL plants and pellet agents.
+    </p>
+</div>
+
+{% if imported_at %}
+<div class="card">
+    <h3 style="margin-top: 0; margin-bottom: 4px;">SAIL and Others Loading from the Same Source, Last {{ days }} Days</h3>
+    <p style="margin: 0 0 12px; color: #52606d;">
+        Rakes loaded {{ shared.start.strftime('%d-%m-%Y') }} to {{ shared.end.strftime('%d-%m-%Y') }} at stations that loaded for consignee {{ sail }}.
+    </p>
+    {% if shared.history_from %}
+    <p class="warn">
+        Lists have only been kept since {{ shared.history_from.strftime('%d-%m-%Y') }}, so rakes loaded earlier in the
+        {{ days }} days and already delivered are missing. Send the all-India list at least daily for full counts.
+    </p>
+    {% endif %}
+    {% if shared.rows %}
+    <div class="desk-only">
+        <div class="scroll-box">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Source Station (Code)</th>
+                        <th class="num">{{ sail }}</th>
+                        <th class="num">Others</th>
+                        <th class="num">Total</th>
+                        <th class="num">{{ sail }} share</th>
+                        <th>Other consignees (rakes)</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in shared.rows %}
+                    <tr>
+                        <td>{{ row.source }}</td>
+                        <td class="num"><b>{{ row.sail }}</b></td>
+                        <td class="num">{{ row.others or '' }}</td>
+                        <td class="num"><b>{{ row.total }}</b></td>
+                        <td class="num share">{{ row.sail_share }}%</td>
+                        <td>{{ chips(row.other_parties, sail) }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+                <tfoot>
+                    <tr>
+                        <td>All sources ({{ shared.rows|length }})</td>
+                        <td class="num">{{ shared.sail }}</td>
+                        <td class="num">{{ shared.others }}</td>
+                        <td class="num">{{ shared.total }}</td>
+                        <td class="num">{{ (100 * shared.sail / shared.total)|round|int }}%</td>
+                        <td></td>
+                    </tr>
+                </tfoot>
+            </table>
+        </div>
+    </div>
+    <div class="phone-only">
+        {% for row in shared.rows %}
+        <div class="ss-card">
+            <div class="ss-head"><span>{{ row.source }}</span><span>{{ row.total }}</span></div>
+            <div class="ss-counts">{{ sail }} <b>{{ row.sail }}</b> &middot; Others <b>{{ row.others }}</b> <span class="share">({{ row.sail_share }}% {{ sail }})</span></div>
+            {{ chips(row.other_parties, sail) }}
+        </div>
+        {% endfor %}
+        <div class="ss-card" style="background: #1f3a5f; color: white;">
+            <div class="ss-head" style="color: white;"><span>All sources ({{ shared.rows|length }})</span><span>{{ shared.total }}</span></div>
+            {{ sail }} <b>{{ shared.sail }}</b> &middot; Others <b>{{ shared.others }}</b>
+        </div>
+    </div>
+    {% else %}
+    <p>No rakes for consignee {{ sail }} were loaded in these {{ days }} days.</p>
+    {% endif %}
+    <p class="note">
+        Every list sent in these {{ days }} days counts, so rakes already delivered are still included; a rake that
+        appears in several lists is counted once, by Rake ID and loading time (LDNG TIME). {{ sail }} means consignee (CNSG) {{ sail }}.
+    </p>
+</div>
+
+<div class="two-col">
+    <div class="card">
+        <h3 style="margin-top: 0;">En-route Rakes by Consigner</h3>
+        {{ party_table("by-consigner", by_consigner, "Consigner", "Consignees") }}
+        <p class="note">Consigner is CNSR on FOIS; each row lists the consignees it is sending to.</p>
+    </div>
+    <div class="card">
+        <h3 style="margin-top: 0;">En-route Rakes by Consignee</h3>
+        {{ party_table("by-consignee", by_consignee, "Consignee", "Consigners") }}
+        <p class="note">Consignee is CNSG on FOIS; each row lists the consigners sending to it.</p>
+    </div>
+</div>
+
+<script>
+    // Filter a party table by any code in the row (the party itself or its partners).
+    document.querySelectorAll(".filter").forEach((input) => {
+        const rows = [...document.getElementById(input.dataset.table).tBodies[0].rows];
+        input.addEventListener("input", () => {
+            const words = input.value.trim().toUpperCase().split(/\s+/).filter(Boolean);
+            rows.forEach((row) => {
+                const text = " " + row.dataset.search + " ";
+                row.hidden = words.length > 0 && !words.every((word) => text.includes(word));
+            });
+        });
+    });
+</script>
+{% endif %}
+
+{% endblock %}
