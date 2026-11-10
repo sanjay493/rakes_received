@@ -38,7 +38,7 @@
     {% for (commodity, destination), sources in grouped_data.items() %}
     <div class="card" style="margin-top: 20px;">
         <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
-            <h3 style="color: white; margin: 0; display: flex; align-items: center; gap: 10px;">
+            <h3 style="color: white; margin: 0; display: flex; align-items: center; flex-wrap: wrap; gap: 10px;">
                 <span style="font-size: 1.3em;">📦</span>
                 <span>{{ commodity }}</span>
                 <span style="font-size: 0.9em; opacity: 0.9;">→</span>
@@ -48,7 +48,7 @@
         </div>
 
         <div style="overflow-x: auto;">
-            <table style="width: 100%; table-layout: fixed; border-collapse: collapse; font-size: 13px;">
+            <table class="commodity-table" style="width: 100%; table-layout: fixed; border-collapse: collapse; font-size: 13px;">
                 <colgroup>
                     <!-- Source Station: 8% -->
                     <col style="width: 8%;">
@@ -316,6 +316,12 @@
         z-index: 10;
     }
     
+    /* Too many columns to squeeze onto a phone: below this width the table scrolls sideways,
+       with the first column pinned. */
+    .commodity-table {
+        min-width: 900px;
+    }
+
     /* Smooth scrolling for table */
     .card > div {
         scroll-behavior: smooth;

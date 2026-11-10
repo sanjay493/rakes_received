@@ -19,8 +19,9 @@
     .sticky-table tr.commodity-start td, .sticky-table tr.commodity-start th { border-top: 2px solid #1f3a5f; }
     /* Fits the screen width: fixed column widths, and long names and headings wrap. On a phone the
        table keeps a minimum width so the counts stay readable, and scrolls sideways instead. */
-    .transit-table { width: 100%; min-width: 760px; table-layout: fixed; font-size: 13px; }
-    .transit-table th, .transit-table td { white-space: normal; overflow-wrap: anywhere; vertical-align: top; }
+    .transit-table { width: 100%; min-width: 1000px; table-layout: fixed; font-size: 13px; }
+    .transit-table th, .transit-table td { white-space: normal; overflow-wrap: break-word; vertical-align: top; }
+    .transit-table thead th { overflow-wrap: normal; }
 </style>
 
 <div class="card">
@@ -77,7 +78,7 @@
     <div class="sticky-table" style="max-height: 75vh; overflow: auto; border: 1px solid #e4e7eb;">
     <table class="transit-table" style="border-collapse: separate; border-spacing: 0;">
         <colgroup>
-            <col style="width: 9%;"><col style="width: 7%;"><col style="width: 14%;"><col style="width: 5%;">
+            <col style="width: 10%;"><col style="width: 8%;"><col style="width: 13%;"><col style="width: 7%;">
             {% for plant in plants %}<col>{% endfor %}<col style="width: 7%;">
         </colgroup>
         <thead>

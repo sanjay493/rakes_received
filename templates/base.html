@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
+    <meta charset="utf-8">
     <title>Transit Analytics System</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
 
@@ -144,19 +145,98 @@
             background: #eee;
             margin-top: 20px;
         }
+
+        /* Header: the title and links wrap onto more lines on a narrow screen. */
+        .topbar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 10px 20px;
+        }
+        .topbar h2 {
+            margin: 10px 0;
+        }
+        .topnav {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+        .topnav a {
+            color: white;
+            text-decoration: none;
+            padding: 8px 16px;
+            background: rgba(255,255,255,0.1);
+            border-radius: 4px;
+        }
+        img, svg, video {
+            max-width: 100%;
+        }
+
+        /* Phones and small tablets */
+        @media (max-width: 700px) {
+            header {
+                padding: 8px 12px;
+            }
+            .topbar h2 {
+                font-size: 18px;
+                margin: 4px 0;
+            }
+            .topnav {
+                gap: 6px;
+            }
+            .topnav a {
+                padding: 6px 10px;
+                font-size: 14px;
+            }
+            .container {
+                padding: 12px 10px;
+            }
+            .card, .graph-box {
+                padding: 14px 12px;
+            }
+            .card h2 {
+                font-size: 20px;
+            }
+            .card h3 {
+                font-size: 17px;
+            }
+            .filter-grid {
+                grid-template-columns: 1fr;
+                gap: 12px;
+            }
+            /* Buttons share the row instead of each needing 150px. */
+            button, .btn-primary, .btn-secondary {
+                min-width: 0;
+            }
+            .button-group > * {
+                flex: 1 1 140px;
+            }
+            .unit-buttons {
+                gap: 6px;
+            }
+            .unit-btn {
+                padding: 8px 12px;
+                font-size: 14px;
+            }
+            /* 16px stops iPhones zooming in when a field is tapped. */
+            select, input, textarea {
+                font-size: 16px;
+            }
+        }
     </style>
 </head>
 
 <body>
 
 <header>
-    <div style="display: flex; justify-content: space-between; align-items: center;">
+    <div class="topbar">
         <h2>🚆 Transit Time Analytics Dashboard</h2>
-        <nav style="display: flex; gap: 20px;">
-            <a href="/upload" style="color: white; text-decoration: none; padding: 8px 16px; background: rgba(255,255,255,0.1); border-radius: 4px;">Upload</a>
-            <a href="/" style="color: white; text-decoration: none; padding: 8px 16px; background: rgba(255,255,255,0.1); border-radius: 4px;">Dashboard</a>
-            <a href="/commodity_analysis" style="color: white; text-decoration: none; padding: 8px 16px; background: rgba(255,255,255,0.1); border-radius: 4px;">Commodity Analysis</a>
-            <a href="/inbound" style="color: white; text-decoration: none; padding: 8px 16px; background: rgba(255,255,255,0.1); border-radius: 4px;">In-Bound</a>
+        <nav class="topnav">
+            <a href="/upload">Upload</a>
+            <a href="/">Dashboard</a>
+            <a href="/commodity_analysis">Commodity Analysis</a>
+            <a href="/inbound">In-Bound</a>
         </nav>
     </div>
 </header>
