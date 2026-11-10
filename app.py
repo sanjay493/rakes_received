@@ -247,6 +247,13 @@ PELLET_AGENTS = ["PMRN", "MOMG", "GFMK", "SSPL", "NKKH"]
 INBOUND_COLUMNS = [*PLANTS, *PELLET_AGENTS]
 INBOUND_DESTINATIONS = {**DESTINATION_PLANTS, **{agent: agent for agent in PELLET_AGENTS}}
 
+def plant_sort_key(code):
+    """Sort key putting plants in PLANTS order (BSP, DSP, RSP, BSL, ISP), then the pellet agents in
+    their order, then anything else by name. Takes a plant name or one of its yard codes."""
+    code = (code or "").strip().upper()
+    plant = INBOUND_DESTINATIONS.get(code, code)
+    return (INBOUND_COLUMNS.index(plant) if plant in INBOUND_COLUMNS else len(INBOUND_COLUMNS), code)
+
 # ------------------ RAIL DISTANCE ------------------
 
 STABLED_STATUS = "ST"  # STTS CODE of a stabled rake
@@ -350,7 +357,7 @@ def mark_runs(rows, field, key):
 
 def route_date_report(rakes):
     """Count rakes by commodity, source, destination and loading date. Dates are columns, oldest first.
-    Commodities run alphabetically, then sources and destinations in code order, with a blank source last.
+    Commodities run alphabetically, then sources in code order with a blank source last, then destinations in plant order.
     commodity_rows and source_rows on a run's first row say how many rows to merge."""
     counts = {}
     labels = {}
@@ -363,7 +370,7 @@ def route_date_report(rakes):
 
     keys = sorted(labels)
     rows = []
-    ordered = sorted(counts.items(), key=lambda item: (item[0][0], not item[0][1], item[0][1], item[0][2]))
+    ordered = sorted(counts.items(), key=lambda item: (item[0][0], not item[0][1], item[0][1], plant_sort_key(item[0][2])))
     for (commodity, source, destination), dates in ordered:
         rows.append({
             "commodity": commodity,
@@ -848,11 +855,9 @@ def inbound_data(destination):
             InboundRake.imported_at == imported_at,
             func.upper(func.trim(InboundRake.sttn_to)).in_(list(INBOUND_DESTINATIONS)),
         )
-        counts = (
-            latest.with_entities(InboundRake.sttn_to, func.count())
-            .group_by(InboundRake.sttn_to)
-            .order_by(InboundRake.sttn_to)
-            .all()
+        counts = sorted(
+            latest.with_entities(InboundRake.sttn_to, func.count()).group_by(InboundRake.sttn_to).all(),
+            key=lambda item: plant_sort_key(item[0]),
         )
         if destination:
             latest = latest.filter(InboundRake.sttn_to == destination)
@@ -954,7 +959,7 @@ def dashboard():
     session_db = SessionDB()
 
     # Get all unique destinations
-    sttn_tos = sorted({x[0] for x in session_db.query(Rake.sttn_to).distinct()})
+    sttn_tos = sorted({x[0] for x in session_db.query(Rake.sttn_to).distinct() if x[0]}, key=plant_sort_key)
 
     # Default to first unit if available
     selected_unit = request.args.get("unit") or request.form.get("unit") or (sttn_tos[0] if sttn_tos else None)
@@ -1644,12 +1649,14 @@ def commodity_analysis():
         if key not in grouped_data:
             grouped_data[key] = []
         grouped_data[key].append(item)
+    # Within each commodity, plants in the usual BSP, DSP, RSP, BSL, ISP order.
+    grouped_data = dict(sorted(grouped_data.items(), key=lambda kv: (kv[0][0], plant_sort_key(kv[0][1]))))
     
     return render_template(
         "commodity_analysis.html",
         grouped_data=grouped_data,
         commodities=sorted(commodities),
-        destinations=sorted(destinations),
+        destinations=sorted(destinations, key=plant_sort_key),
         selected_commodity=selected_commodity,
         selected_destination=selected_destination,
         header_months=header_months,
