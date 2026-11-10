@@ -187,7 +187,9 @@
 </div>
 
 <div class="card" style="overflow-x: auto;">
-    <table style="width: 100%; border-collapse: collapse; font-size: 13px; white-space: nowrap;">
+    <h3 style="margin-top: 0;">Rake Details</h3>
+    <div class="sticky-table" style="max-height: 75vh; overflow: auto; border: 1px solid #e4e7eb;">
+    <table style="width: 100%; border-collapse: separate; border-spacing: 0; font-size: 13px; white-space: nowrap;">
         <thead>
             <tr style="background: #1f3a5f; color: white; text-align: left;">
                 <th style="padding: 8px;">Rake ID</th>
@@ -227,6 +229,7 @@
             {% endfor %}
         </tbody>
     </table>
+    </div>
 </div>
 {% endif %}
 
