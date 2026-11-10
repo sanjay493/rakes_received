@@ -24,20 +24,29 @@ NOTES = [
     "Source station is the STTN FROM of the rakes; each distance slab lists every source with rakes to any plant or pellet agent.",
 ]
 
-# (heading, value for a rake, width in the PDF in points)
+DETAIL_TITLE = "Rake Details"
+ROUTE_TITLE = "Rakes by Commodity, Source, Destination and Loading Date"
+ROUTE_NOTE = "Each date column (day-month) counts the rakes loaded that day, from LDNG TIME on FOIS."
+
+
+# (heading, value for a rake, width in the PDF in points). Values read as on the page.
 def km_left(rake):
-    return None if rake.distance_km is None else round(rake.distance_km)
+    return "—" if rake.distance_km is None else round(rake.distance_km)
+
+
+def status(rake):
+    return f"{rake.stts_code} (stabled)" if rake.stabled else rake.stts_code
 
 DETAIL_COLUMNS = [
-    ("Rake ID", lambda r: r.rake_id, 84),
-    ("Load Name", lambda r: r.load_name, 84),
+    ("Rake ID", lambda r: r.rake_id, 80),
+    ("Load Name", lambda r: r.load_name, 76),
     ("From", lambda r: r.sttn_from, 38),
     ("To", lambda r: r.sttn_to, 38),
     ("Commodity", lambda r: r.commodity_name, 78),
     ("Units", lambda r: r.totl_unts, 30),
     ("Current Location", lambda r: r.crnt_locn, 48),
     ("Km Left", km_left, 30),
-    ("Status", lambda r: r.stts_code, 34),
+    ("Status", status, 46),
     ("Status Time", lambda r: r.stts_time, 62),
     ("Dept Time", lambda r: r.dept_time, 62),
     ("Transit Time", lambda r: r.transit_time, 40),
@@ -90,7 +99,7 @@ def style_row(sheet, row, columns, bold=False, fill=None, color=None):
 
 def add_report_sheet(workbook, data):
     sheet = workbook.active
-    sheet.title = "Commodity Report"
+    sheet.title = "Rakes in Transit"
     plants = data["plants"]
     first_count = 5  # After Commodity, Distance Left, Source Station Name and Source Code
     columns = first_count - 1 + 2 * (len(plants) + 1)
@@ -184,9 +193,12 @@ def add_route_sheet(workbook, data):
     first_date = 4  # After commodity, source and destination
     columns = first_date + len(routes["dates"])
     headings = ["Commodity", "Source Station (Code)", "Destination Station (Code)"]
+    title = ROUTE_TITLE + (f" ({data['destination']})" if data["destination"] else "")
+    put_text(sheet, 1, 1, title).font = Font(bold=True, size=14)
+    header = 3
     for column, heading in enumerate([*headings, *routes["dates"], "Total"], 1):
-        put_text(sheet, 1, column, heading)
-    style_row(sheet, 1, columns, bold=True, fill=NAVY, color="FFFFFF")
+        put_text(sheet, header, column, heading)
+    style_row(sheet, header, columns, bold=True, fill=NAVY, color="FFFFFF")
 
     def merge_down(row, count, column, value, bold=False):
         cell = put_text(sheet, row, column, value)
@@ -195,7 +207,7 @@ def add_route_sheet(workbook, data):
         if count > 1:
             sheet.merge_cells(start_row=row, end_row=row + count - 1, start_column=column, end_column=column)
 
-    row = 2
+    row = header + 1
     for route in routes["rows"]:
         if route["commodity_rows"]:
             merge_down(row, route["commodity_rows"], 1, route["commodity"], bold=True)
@@ -213,34 +225,41 @@ def add_route_sheet(workbook, data):
             sheet.cell(row=row, column=column, value=count or None)
         sheet.cell(row=row, column=columns, value=routes["total"])
         style_row(sheet, row, columns, bold=True, fill=NAVY, color="FFFFFF")
+        row += 1
+    put_text(sheet, row + 1, 1, ROUTE_NOTE).font = Font(italic=True, color="52606D")
 
     for column, width in enumerate([22, 34, 34], 1):
         sheet.column_dimensions[get_column_letter(column)].width = width
     for column in range(first_date, columns + 1):
         sheet.column_dimensions[get_column_letter(column)].width = 8
-    sheet.freeze_panes = sheet.cell(row=2, column=first_date)
+    sheet.freeze_panes = sheet.cell(row=header + 1, column=first_date)
 
 
 def add_detail_sheet(workbook, data):
-    sheet = workbook.create_sheet("Rake Details")
-    headings = [heading for heading, _, _ in DETAIL_COLUMNS] + ["Stabled"]
+    sheet = workbook.create_sheet(DETAIL_TITLE)
+    headings = [heading for heading, _, _ in DETAIL_COLUMNS]
+    status_column = headings.index("Status") + 1
+    put_text(sheet, 1, 1, DETAIL_TITLE).font = Font(bold=True, size=14)
+    header = 3
     for column, heading in enumerate(headings, 1):
-        sheet.cell(row=1, column=column, value=heading)
-    style_row(sheet, 1, len(headings), bold=True, fill=NAVY, color="FFFFFF")
+        put_text(sheet, header, column, heading)
+    style_row(sheet, header, len(headings), bold=True, fill=NAVY, color="FFFFFF")
 
-    for row, rake in enumerate(data["rakes"], 2):
+    for row, rake in enumerate(data["rakes"], header + 1):
         for column, (_, value, _) in enumerate(DETAIL_COLUMNS, 1):
             put_text(sheet, row, column, value(rake))
         if rake.stabled:
-            put_text(sheet, row, len(headings), "Yes")
-            style_row(sheet, row, len(headings), fill=STABLED_FILL, color=STABLED_TEXT)
+            # Shaded row, with the status in bold red, as on the page.
+            style_row(sheet, row, len(headings), fill=STABLED_FILL)
+            sheet.cell(row=row, column=status_column).font = Font(bold=True, color=STABLED_TEXT)
 
-    sheet.freeze_panes = "A2"
-    sheet.auto_filter.ref = f"A1:{get_column_letter(len(headings))}{max(len(data['rakes']) + 1, 1)}"
+    last_row = header + len(data["rakes"])
+    sheet.freeze_panes = sheet.cell(row=header + 1, column=1)
+    sheet.auto_filter.ref = f"A{header}:{get_column_letter(len(headings))}{last_row}"
     for column, heading in enumerate(headings, 1):
         longest = max(
             [len(heading)] + [len(str(value)) for value in (
-                sheet.cell(row=row, column=column).value for row in range(2, len(data["rakes"]) + 2)
+                sheet.cell(row=row, column=column).value for row in range(header + 1, last_row + 1)
             ) if value is not None]
         )
         sheet.column_dimensions[get_column_letter(column)].width = min(longest + 2, 30)
@@ -276,6 +295,8 @@ def pdf_styles():
         "cell": ParagraphStyle("cell", parent=base["BodyText"], fontSize=7, leading=8.5),
         "cell_heading": ParagraphStyle("cell_heading", parent=base["BodyText"], fontSize=6.5, leading=8,
                                        fontName="Helvetica-Bold", textColor=colors.white),
+        "cell_stabled": ParagraphStyle("cell_stabled", parent=base["BodyText"], fontSize=7, leading=8.5,
+                                       fontName="Helvetica-Bold", textColor=colors.HexColor(f"#{STABLED_TEXT}")),
         "cell_bold": ParagraphStyle("cell_bold", parent=base["BodyText"], fontSize=8, leading=10,
                                     fontName="Helvetica-Bold"),
     }
@@ -441,10 +462,8 @@ def detail_table(data, styles):
     for rake in data["rakes"]:
         cells = []
         for heading, value, _ in DETAIL_COLUMNS:
-            shown = value(rake)
-            if heading == "Km Left" and shown is None:
-                shown = "—"
-            cells.append(text_cell(shown, styles["cell"]))
+            style = styles["cell_stabled"] if heading == "Status" and rake.stabled else styles["cell"]
+            cells.append(text_cell(value(rake), style))
         rows.append(cells)
         if rake.stabled:
             commands.append(("BACKGROUND", (0, len(rows) - 1), (-1, len(rows) - 1), colors.HexColor(f"#{STABLED_FILL}")))
@@ -472,12 +491,12 @@ def build_pdf(data):
     if data["routes"]["rows"]:
         story.extend([
             PageBreak(),
-            Paragraph("Rakes by Commodity, Source, Destination and Loading Date", styles["heading"]),
+            Paragraph(escape(ROUTE_TITLE + (f" ({data['destination']})" if data["destination"] else "")), styles["heading"]),
             route_table(data, styles),
             Spacer(1, 6),
-            Paragraph("Each date column (day-month) counts the rakes loaded that day, from LDNG TIME on FOIS.", styles["note"]),
+            Paragraph(escape(ROUTE_NOTE), styles["note"]),
         ])
-    story.extend([PageBreak(), Paragraph("Rake Details (stabled rakes are shaded, status ST)", styles["heading"])])
+    story.extend([PageBreak(), Paragraph(DETAIL_TITLE, styles["heading"])])
     story.append(detail_table(data, styles))
 
     output = io.BytesIO()
