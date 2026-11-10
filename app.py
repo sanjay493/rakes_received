@@ -854,7 +854,7 @@ def index():
 SAIL_CONSIGNEE = "SAIL"  # CNSG of rakes for SAIL, at the plants and at its stockyards
 SHARED_SOURCE_DAYS = 7
 
-INBOUND_KEEP_DAYS = 30  # Older lists are deleted; the All-India 7-day table needs only SHARED_SOURCE_DAYS
+INBOUND_KEEP_DAYS = 183  # About 6 months; older lists are deleted. The All-India 7-day table needs only SHARED_SOURCE_DAYS
 
 def delete_old_inbound_lists(session, now):
     """Delete Loaded In-Bound lists sent more than INBOUND_KEEP_DAYS days before now, except the latest list
