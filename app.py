@@ -335,11 +335,6 @@ def route_date_report(rakes):
         "total": len(rakes),
     }
 
-def source_text(sources):
-    """Source stations with their rake counts, most rakes first: "BKSC (3), JSG (1)"."""
-    ordered = sorted(sources.items(), key=lambda item: (-item[1], item[0]))
-    return ", ".join(f"{station} ({count})" for station, count in ordered)
-
 def add_counts(lines):
     """Add up counts_line() results, plant by plant."""
     return counts_line({
@@ -347,31 +342,34 @@ def add_counts(lines):
         "stabled": {plant: sum(line["stabled"][plant] for line in lines) for plant in INBOUND_COLUMNS},
     })
 
+def empty_counts():
+    return {"rakes": dict.fromkeys(INBOUND_COLUMNS, 0), "stabled": dict.fromkeys(INBOUND_COLUMNS, 0)}
+
 def commodity_plant_report(rakes):
-    """Count rakes and stabled rakes by commodity, distance slab and plant or agent, largest commodity first."""
+    """Count rakes and stabled rakes by commodity, distance slab, source station and plant or agent,
+    largest commodity first. Within a slab, the source with the most rakes comes first."""
     counts = {}
     for rake in rakes:
         plant = INBOUND_DESTINATIONS[rake.sttn_to.strip().upper()]
         slabs = counts.setdefault(commodity_name(rake.cmdt), {})
-        slab = slabs.setdefault(slab_start(rake.distance_km), {
-            "rakes": dict.fromkeys(INBOUND_COLUMNS, 0),
-            "stabled": dict.fromkeys(INBOUND_COLUMNS, 0),
-            "sources": Counter(),
-        })
-        slab["rakes"][plant] += 1
-        slab["stabled"][plant] += is_stabled(rake)
-        source = (rake.sttn_from or "").strip().upper()
-        if source:
-            slab["sources"][source] += 1
+        sources = slabs.setdefault(slab_start(rake.distance_km), {})
+        source = sources.setdefault((rake.sttn_from or "").strip().upper(), empty_counts())
+        source["rakes"][plant] += 1
+        source["stabled"][plant] += is_stabled(rake)
 
     report = []
     for commodity, slabs in counts.items():
-        # Only slabs with rakes are in the dict, so empty ones never appear.
-        lines = [
-            {"label": slab_label(start), "sources": source_text(slabs[start]["sources"]), **counts_line(slabs[start])}
-            for start in sorted(slabs)
-        ]
-        report.append({"commodity": commodity, "slabs": lines, "totals": add_counts(lines)})
+        # Only slabs and sources with rakes are in the dict, so empty ones never appear.
+        lines = []
+        for start in sorted(slabs):
+            sources = [
+                {"code": code or "—", "name": get_station_display_name(code) if code else "—", **counts_line(c)}
+                for code, c in slabs[start].items()
+            ]
+            sources.sort(key=lambda line: (-line["total"], line["code"]))
+            lines.append({"label": slab_label(start), "sources": sources, **add_counts(sources)})
+        report.append({"commodity": commodity, "slabs": lines, "totals": add_counts(lines),
+                       "source_rows": sum(len(line["sources"]) for line in lines)})
     report.sort(key=lambda row: (-row["totals"]["total"], row["commodity"]))
 
     return {

@@ -20,7 +20,7 @@ NOTES = [
     'Each plant and pellet agent shows all rakes, and how many of them are stabled (status ST). Stabled rakes are included in the rake count.',
     "Km left is the goods distance from the current location to the destination on the Railways' Rates Branch System.",
     '"Unknown" means the distance has not been looked up yet or the site does not know that location.',
-    "Source stations are the STTN FROM of the rakes in that row, with the number of rakes in brackets.",
+    "Source station is the STTN FROM of the rakes; each distance slab lists every source with rakes to any plant or pellet agent.",
 ]
 
 # (heading, value for a rake, width in the PDF in points)
@@ -45,10 +45,14 @@ DETAIL_COLUMNS = [
 ]
 
 
+def as_on(data):
+    return f"As on {data['imported_at'].strftime('%d-%m-%Y %H:%M')} IST, when the data was received from FOIS"
+
+
 def title_lines(data):
-    title = "Loaded In-Bound Rakes" + (f" to {data['destination']}" if data["destination"] else "")
+    title = "Rakes in Transit" + (f" to {data['destination']}" if data["destination"] else "")
     shown = len(data["rakes"])
-    summary = f"{shown} rakes to the plants and pellet agents in the list sent from FOIS on {data['imported_at'].strftime('%d-%m-%Y %H:%M')} IST."
+    summary = f"{as_on(data)}. {shown} rakes to the plants and pellet agents."
     if data["stabled_count"]:
         summary += f" {data['stabled_count']} stabled (status ST)."
     summary += f" Km left is available for {data['rakes_with_distance']} of {shown} rakes."
@@ -87,7 +91,8 @@ def add_report_sheet(workbook, data):
     sheet = workbook.active
     sheet.title = "Commodity Report"
     plants = data["plants"]
-    columns = 2 + 2 * (len(plants) + 1) + 1  # The last one is the source stations
+    first_count = 5  # After Commodity, Distance Left, Source Station Name and Source Code
+    columns = first_count - 1 + 2 * (len(plants) + 1)
     title, summary = title_lines(data)
 
     put_text(sheet, 1, 1, title).font = Font(bold=True, size=14)
@@ -95,11 +100,11 @@ def add_report_sheet(workbook, data):
 
     # Two header rows: each plant spans its Rakes and ST columns.
     top, sub = 4, 5
-    for column, heading in ((1, "Commodity"), (2, "Distance Left"), (columns, "Source Stations (rakes)")):
+    for column, heading in enumerate(("Commodity", "Distance Left", "Source Station Name", "Source Code"), 1):
         sheet.cell(row=top, column=column, value=heading)
         sheet.merge_cells(start_row=top, end_row=sub, start_column=column, end_column=column)
     for index, name in enumerate([*plants, "Total"]):
-        column = 3 + 2 * index
+        column = first_count + 2 * index
         sheet.cell(row=top, column=column, value=name)
         sheet.merge_cells(start_row=top, end_row=top, start_column=column, end_column=column + 1)
         sheet.cell(row=sub, column=column, value="Rakes")
@@ -112,26 +117,28 @@ def add_report_sheet(workbook, data):
     row = sub + 1
     for commodity in data["report"]["rows"]:
         for slab in commodity["slabs"]:
-            put_text(sheet, row, 1, commodity["commodity"]).font = Font(bold=True)
-            put_text(sheet, row, 2, slab["label"])
-            put_count_line(sheet, row, 3, slab, plants)
-            put_text(sheet, row, columns, slab["sources"]).alignment = Alignment(wrap_text=True, vertical="top")
-            row += 1
+            for source in slab["sources"]:
+                put_text(sheet, row, 1, commodity["commodity"]).font = Font(bold=True)
+                put_text(sheet, row, 2, slab["label"])
+                put_text(sheet, row, 3, source["name"])
+                put_text(sheet, row, 4, source["code"])
+                put_count_line(sheet, row, first_count, source, plants)
+                row += 1
         put_text(sheet, row, 1, commodity["commodity"])
         put_text(sheet, row, 2, "Total")
-        put_count_line(sheet, row, 3, commodity["totals"], plants)
+        put_count_line(sheet, row, first_count, commodity["totals"], plants)
         style_row(sheet, row, columns, bold=True, fill=LIGHT)
         row += 1
 
     if data["report"]["rows"]:
         put_text(sheet, row, 1, "All commodities")
-        put_count_line(sheet, row, 3, data["report"]["totals"], plants)
+        put_count_line(sheet, row, first_count, data["report"]["totals"], plants)
         style_row(sheet, row, columns, bold=True, fill=NAVY, color="FFFFFF")
         row += 1
 
     # Stabled counts stand out, except on the dark totals row where red wouldn't be readable.
     for body_row in range(sub + 1, row - 1):
-        for column in range(4, columns + 1, 2):
+        for column in range(first_count + 1, columns + 1, 2):
             sheet.cell(row=body_row, column=column).font = Font(
                 bold=sheet.cell(row=body_row, column=column).font.bold, color=STABLED_TEXT
             )
@@ -143,10 +150,11 @@ def add_report_sheet(workbook, data):
 
     sheet.column_dimensions["A"].width = 26
     sheet.column_dimensions["B"].width = 15
-    for column in range(3, columns + 1):
+    sheet.column_dimensions["C"].width = 28
+    sheet.column_dimensions["D"].width = 10
+    for column in range(first_count, columns + 1):
         sheet.column_dimensions[get_column_letter(column)].width = 7
-    sheet.column_dimensions[get_column_letter(columns)].width = 45
-    sheet.freeze_panes = sheet.cell(row=sub + 1, column=3)
+    sheet.freeze_panes = sheet.cell(row=sub + 1, column=first_count)
 
 
 def add_route_sheet(workbook, data):
@@ -245,13 +253,13 @@ def text_cell(value, style):
 
 def report_table(data, styles):
     plants = data["plants"]
-    rows = [["Commodity", "Distance Left", *plants, "Total", "Source Stations (rakes)"]]
+    rows = [["Commodity", "Distance Left", "Source Station Name", "Code", *plants, "Total"]]
     commands = [
         ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor(f"#{NAVY}")),
         ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
         ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
         ("FONTSIZE", (0, 0), (-1, -1), 8),
-        ("ALIGN", (2, 0), (-2, -1), "RIGHT"),
+        ("ALIGN", (4, 0), (-1, -1), "RIGHT"),
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
         ("LINEBELOW", (0, 0), (-1, -1), 0.25, colors.HexColor("#CBD2D9")),
         ("LEFTPADDING", (0, 0), (-1, -1), 3),
@@ -260,16 +268,19 @@ def report_table(data, styles):
         ("BOTTOMPADDING", (0, 0), (-1, -1), 2.5),
     ]
 
-    def add_line(first, second, line, *style, sources=""):
-        rows.append([first, second, *[count_text(line["plants"][p], line["stabled"][p]) for p in plants],
-                     count_text(line["total"], line["total_stabled"]), text_cell(sources, styles["cell"])])
+    def add_line(first, second, line, *style, name="", code=""):
+        rows.append([first, second, text_cell(name, styles["cell"]), code,
+                     *[count_text(line["plants"][p], line["stabled"][p]) for p in plants],
+                     count_text(line["total"], line["total_stabled"])])
         for command in style:
             commands.append((command[0], (0, len(rows) - 1), (-1, len(rows) - 1), *command[1:]))
 
     for commodity in data["report"]["rows"]:
         for slab in commodity["slabs"]:
-            # Repeated on each row, because a commodity can run over a page break.
-            add_line(text_cell(commodity["commodity"], styles["cell_bold"]), slab["label"], slab, sources=slab["sources"])
+            for source in slab["sources"]:
+                # Repeated on each row, because a commodity can run over a page break.
+                add_line(text_cell(commodity["commodity"], styles["cell_bold"]), slab["label"], source,
+                         name=source["name"], code=source["code"])
         add_line(text_cell(commodity["commodity"], styles["cell_bold"]), "Total", commodity["totals"],
                  ("BACKGROUND", colors.HexColor(f"#{LIGHT}")), ("FONTNAME", "Helvetica-Bold"),
                  ("LINEBELOW", 0.75, colors.HexColor(f"#{NAVY}")))
@@ -278,7 +289,7 @@ def report_table(data, styles):
              ("BACKGROUND", colors.HexColor(f"#{NAVY}")), ("TEXTCOLOR", colors.white), ("FONTNAME", "Helvetica-Bold"))
 
     # Fits the 762 points inside the landscape A4 page frame; Total is wider for its bold figures.
-    table = Table(rows, colWidths=[90, 60] + [420 / len(plants)] * len(plants) + [56, 136], repeatRows=1, hAlign="LEFT")
+    table = Table(rows, colWidths=[86, 56, 110, 34] + [420 / len(plants)] * len(plants) + [56], repeatRows=1, hAlign="LEFT")
     table.setStyle(TableStyle(commands))
     return table
 
