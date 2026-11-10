@@ -13,6 +13,7 @@ from reportlab.platypus import PageBreak, Paragraph, SimpleDocTemplate, Spacer, 
 
 NAVY = "1F3A5F"
 LIGHT = "E8EEF5"
+BY_SOURCE_FILL = "F5F8FB"
 STABLED_FILL = "FEF3F2"
 STABLED_TEXT = "B42318"
 
@@ -114,20 +115,40 @@ def add_report_sheet(workbook, data):
         for column in range(1, columns + 1):
             sheet.cell(row=row, column=column).alignment = Alignment(horizontal="center", vertical="center")
 
+    def merge_down(first_row, last_row, column, value, bold=False):
+        """Write value once and merge it down the rows it covers, like the page does."""
+        cell = put_text(sheet, first_row, column, value)
+        cell.font = Font(bold=bold)
+        cell.alignment = Alignment(vertical="top", wrap_text=True)
+        if last_row > first_row:
+            sheet.merge_cells(start_row=first_row, end_row=last_row, start_column=column, end_column=column)
+
+    def put_source(row, source):
+        put_text(sheet, row, 3, source["name"])
+        put_text(sheet, row, 4, source["code"])
+        put_count_line(sheet, row, first_count, source, plants)
+
     row = sub + 1
     for commodity in data["report"]["rows"]:
+        merge_down(row, row + commodity["row_count"] - 1, 1, commodity["commodity"], bold=True)
         for slab in commodity["slabs"]:
+            merge_down(row, row + len(slab["sources"]) - 1, 2, slab["label"])
             for source in slab["sources"]:
-                put_text(sheet, row, 1, commodity["commodity"]).font = Font(bold=True)
-                put_text(sheet, row, 2, slab["label"])
-                put_text(sheet, row, 3, source["name"])
-                put_text(sheet, row, 4, source["code"])
-                put_count_line(sheet, row, first_count, source, plants)
+                put_source(row, source)
                 row += 1
-        put_text(sheet, row, 1, commodity["commodity"])
+        merge_down(row, row + len(commodity["by_source"]) - 1, 2, "Enroute by Source", bold=True)
+        for source in commodity["by_source"]:
+            put_source(row, source)
+            for column in range(2, columns + 1):
+                sheet.cell(row=row, column=column).fill = PatternFill("solid", fgColor=BY_SOURCE_FILL)
+            row += 1
         put_text(sheet, row, 2, "Total")
+        sheet.merge_cells(start_row=row, end_row=row, start_column=2, end_column=4)
         put_count_line(sheet, row, first_count, commodity["totals"], plants)
-        style_row(sheet, row, columns, bold=True, fill=LIGHT)
+        for column in range(2, columns + 1):
+            cell = sheet.cell(row=row, column=column)
+            cell.font = Font(bold=True)
+            cell.fill = PatternFill("solid", fgColor=LIGHT)
         row += 1
 
     if data["report"]["rows"]:
@@ -264,6 +285,46 @@ def text_cell(value, style):
     return Paragraph(escape("" if value is None else str(value)), style)
 
 
+# A merged PDF cell can't run over a page break, so long merges are made in blocks of this many rows.
+# Every row holds the value and only the first of each block shows, so the name is on every page.
+MAX_PDF_SPAN = 10
+
+
+def pieces(count):
+    """A run of count rows cut into blocks of at most MAX_PDF_SPAN rows: [10, 10, 3] for 23."""
+    return [min(MAX_PDF_SPAN, count - start) for start in range(0, count, MAX_PDF_SPAN)]
+
+
+def merge_blocks(column, first_row, blocks):
+    """reportlab commands merging a column down each block of rows in turn, starting at first_row."""
+    commands = []
+    for size in blocks:
+        last_row = first_row + size - 1
+        if size > 1:
+            commands.append(("SPAN", (column, first_row), (column, last_row)))
+        commands.append(("VALIGN", (column, first_row), (column, last_row), "TOP"))
+        first_row = last_row + 1
+    return commands
+
+
+def merged_down(column, first_row, count):
+    """reportlab commands merging a column down count rows, like the page does."""
+    return merge_blocks(column, first_row, pieces(count))
+
+
+def commodity_blocks(groups):
+    """Blocks for the commodity column from its groups of rows (each slab, the by-source rows, the
+    total). Whole pieces of groups are added up to MAX_PDF_SPAN rows, so a block never ends inside a
+    merged distance cell; otherwise the table could find no row to break the page at."""
+    blocks = []
+    for size in (piece for group in groups for piece in pieces(group)):
+        if blocks and blocks[-1] + size <= MAX_PDF_SPAN:
+            blocks[-1] += size
+        else:
+            blocks.append(size)
+    return blocks
+
+
 def report_table(data, styles):
     plants = data["plants"]
     rows = [["Commodity", "Distance Left", "Source Station Name", "Code", *plants, "Total"]]
@@ -289,14 +350,27 @@ def report_table(data, styles):
             commands.append((command[0], (0, len(rows) - 1), (-1, len(rows) - 1), *command[1:]))
 
     for commodity in data["report"]["rows"]:
+        first_row = len(rows)
+        name = text_cell(commodity["commodity"], styles["cell_bold"])
+        groups = [len(slab["sources"]) for slab in commodity["slabs"]] + [len(commodity["by_source"]), 1]
+        commands += merge_blocks(0, first_row, commodity_blocks(groups))
         for slab in commodity["slabs"]:
+            commands += merged_down(1, len(rows), len(slab["sources"]))
             for source in slab["sources"]:
-                # Repeated on each row, because a commodity can run over a page break.
-                add_line(text_cell(commodity["commodity"], styles["cell_bold"]), slab["label"], source,
-                         name=source["name"], code=source["code"])
-        add_line(text_cell(commodity["commodity"], styles["cell_bold"]), "Total", commodity["totals"],
-                 ("BACKGROUND", colors.HexColor(f"#{LIGHT}")), ("FONTNAME", "Helvetica-Bold"),
-                 ("LINEBELOW", 0.75, colors.HexColor(f"#{NAVY}")))
+                add_line(name, slab["label"], source, name=source["name"], code=source["code"])
+        commands += merged_down(1, len(rows), len(commodity["by_source"]))
+        for source in commodity["by_source"]:
+            add_line(name, text_cell("Enroute by Source", styles["cell_bold"]), source,
+                     name=source["name"], code=source["code"])
+            commands.append(("BACKGROUND", (1, len(rows) - 1), (-1, len(rows) - 1), colors.HexColor(f"#{BY_SOURCE_FILL}")))
+        add_line(name, "Total", commodity["totals"])
+        last = len(rows) - 1
+        commands += [
+            ("SPAN", (1, last), (3, last)),
+            ("BACKGROUND", (1, last), (-1, last), colors.HexColor(f"#{LIGHT}")),
+            ("FONTNAME", (1, last), (-1, last), "Helvetica-Bold"),
+            ("LINEBELOW", (0, last), (-1, last), 0.75, colors.HexColor(f"#{NAVY}")),
+        ]
 
     add_line("All commodities", "", data["report"]["totals"],
              ("BACKGROUND", colors.HexColor(f"#{NAVY}")), ("TEXTCOLOR", colors.white), ("FONTNAME", "Helvetica-Bold"))
@@ -314,12 +388,11 @@ def route_table(data, styles):
             + [*routes["dates"], "Total"]]
     spans = []
     for route in routes["rows"]:
-        # A source's name and code are merged down all its rows.
-        if route["source_rows"] > 1:
-            last = len(rows) + route["source_rows"] - 1
-            spans += [("SPAN", (column, len(rows)), (column, last)) for column in (0, 1)]
-            spans.append(("VALIGN", (0, len(rows)), (1, last), "TOP"))
-        rows.append([text_cell(route["source_name"], styles["cell_bold"]), route["source"],
+        # A source's name and code are merged down its rows; every row holds them, for page breaks.
+        if route["source_rows"]:
+            source_cells = (text_cell(route["source_name"], styles["cell_bold"]), route["source"])
+            spans += merged_down(0, len(rows), route["source_rows"]) + merged_down(1, len(rows), route["source_rows"])
+        rows.append([*source_cells,
                      text_cell(route["commodity"], styles["cell"]), text_cell(route["destination_name"], styles["cell"]),
                      route["destination"], *[count or "" for count in route["counts"]], route["total"]])
     rows.append(["All routes", "", "", "", "", *[count or "" for count in routes["totals"]], routes["total"]])

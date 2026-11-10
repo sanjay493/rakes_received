@@ -10,6 +10,13 @@
 {% endmacro %}
 
 {% block content %}
+<style>
+    .sticky-table thead th { position: sticky; top: 0; z-index: 2; background: #1f3a5f; }
+    .sticky-table tbody td, .sticky-table tbody th { border-bottom: 1px solid #e4e7eb; }
+    .sticky-table tr.by-source td { background: #f5f8fb; }
+    .sticky-table tr.commodity-total td { background: #e8eef5; font-weight: bold; border-bottom: 2px solid #1f3a5f; }
+    .sticky-table tfoot td { position: sticky; bottom: 0; background: #1f3a5f; }
+</style>
 
 <div class="card">
     <h2 style="margin-top: 0;">Loaded In-Bound Rakes</h2>
@@ -61,7 +68,9 @@
     <h3 style="margin-top: 0; margin-bottom: 4px;">Rakes in Transit{% if destination %} to {{ destination }}{% endif %}</h3>
     <p style="margin: 0 0 12px; color: #52606d;">As on {{ imported_at.strftime('%d-%m-%Y %H:%M') }} IST, when the data was received from FOIS</p>
     {% if report.rows %}
-    <table style="border-collapse: collapse; font-size: 14px; white-space: nowrap;">
+    {# Scrolls inside its own box, so the heading row stays in view while scrolling down. #}
+    <div class="sticky-table" style="max-height: 75vh; overflow: auto; border: 1px solid #e4e7eb;">
+    <table style="border-collapse: separate; border-spacing: 0; font-size: 14px; white-space: nowrap;">
         <thead>
             <tr style="background: #1f3a5f; color: white; text-align: left;">
                 <th style="padding: 8px 16px;">Commodity</th>
@@ -81,7 +90,7 @@
             {% for source in slab.sources %}
             <tr style="border-bottom: 1px solid #e4e7eb;">
                 {% if first_slab and loop.first %}
-                <th scope="rowgroup" rowspan="{{ row.source_rows + 1 }}" style="padding: 8px 16px; text-align: left; vertical-align: top; border-right: 1px solid #e4e7eb;">{{ row.commodity }}</th>
+                <th scope="rowgroup" rowspan="{{ row.row_count }}" style="padding: 8px 16px; text-align: left; vertical-align: top; border-right: 1px solid #e4e7eb;">{{ row.commodity }}</th>
                 {% endif %}
                 {% if loop.first %}
                 <td rowspan="{{ slab.sources|length }}" style="padding: 8px 16px; vertical-align: top; border-right: 1px solid #e4e7eb;">{{ slab.label }}</td>
@@ -92,7 +101,17 @@
             </tr>
             {% endfor %}
             {% endfor %}
-            <tr style="background: #e8eef5; font-weight: bold; border-bottom: 2px solid #1f3a5f;">
+            {% for source in row.by_source %}
+            <tr class="by-source">
+                {% if loop.first %}
+                <td rowspan="{{ row.by_source|length }}" style="padding: 8px 16px; vertical-align: top; font-weight: bold;">Enroute by Source</td>
+                {% endif %}
+                <td style="padding: 8px 16px;">{{ source.name }}</td>
+                <td style="padding: 8px 16px;">{{ source.code }}</td>
+                {{ count_cells(source) }}
+            </tr>
+            {% endfor %}
+            <tr class="commodity-total">
                 <td style="padding: 8px 16px;" colspan="3">Total</td>
                 {{ count_cells(row.totals) }}
             </tr>
@@ -108,6 +127,7 @@
             </tr>
         </tfoot>
     </table>
+    </div>
     {% else %}
     <p>No rakes in this list are going to the plants or pellet agents.</p>
     {% endif %}

@@ -406,8 +406,20 @@ def commodity_plant_report(rakes):
             ]
             sources.sort(key=lambda line: (-line["total"], line["code"]))
             lines.append({"label": slab_label(start), "sources": sources, **add_counts(sources)})
-        report.append({"commodity": commodity, "slabs": lines, "totals": add_counts(lines),
-                       "source_rows": sum(len(line["sources"]) for line in lines)})
+
+        # The same rakes again, source by source over all distances, for the bottom of the commodity.
+        by_source = {}
+        for line in lines:
+            for source in line["sources"]:
+                by_source.setdefault(source["code"], []).append(source)
+        by_source = [
+            {"code": code, "name": group[0]["name"], **add_counts(group)} for code, group in by_source.items()
+        ]
+        by_source.sort(key=lambda line: (-line["total"], line["code"]))
+
+        slab_rows = sum(len(line["sources"]) for line in lines)
+        report.append({"commodity": commodity, "slabs": lines, "by_source": by_source, "totals": add_counts(lines),
+                       "row_count": slab_rows + len(by_source) + 1})
     report.sort(key=lambda row: (-row["totals"]["total"], row["commodity"]))
 
     return {
