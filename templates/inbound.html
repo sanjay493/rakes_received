@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 
 {% macro count_cell(rakes, stabled) %}
-<td style="padding: 8px 16px; text-align: right;">{{ rakes or '' }}{% if stabled %} <span style="color: #b42318; font-weight: bold;">({{ stabled }} ST)</span>{% endif %}</td>
+<td style="padding: 6px 8px; text-align: right;">{{ rakes or '' }}{% if stabled %} <span style="color: #b42318; font-weight: bold; white-space: nowrap;">({{ stabled }} ST)</span>{% endif %}</td>
 {% endmacro %}
 
 {% macro count_cells(line) %}
@@ -17,6 +17,10 @@
     .sticky-table tr.commodity-total td { background: #e8eef5; font-weight: bold; border-bottom: 2px solid #1f3a5f; }
     .sticky-table tfoot td { position: sticky; bottom: 0; background: #1f3a5f; }
     .sticky-table tr.commodity-start td, .sticky-table tr.commodity-start th { border-top: 2px solid #1f3a5f; }
+    /* Fits the screen width: fixed column widths, and long names and headings wrap. On a phone the
+       table keeps a minimum width so the counts stay readable, and scrolls sideways instead. */
+    .transit-table { width: 100%; min-width: 760px; table-layout: fixed; font-size: 13px; }
+    .transit-table th, .transit-table td { white-space: normal; overflow-wrap: anywhere; vertical-align: top; }
 </style>
 
 <div class="card">
@@ -71,17 +75,21 @@
     {% if report.rows %}
     {# Scrolls inside its own box, so the heading row stays in view while scrolling down. #}
     <div class="sticky-table" style="max-height: 75vh; overflow: auto; border: 1px solid #e4e7eb;">
-    <table style="border-collapse: separate; border-spacing: 0; font-size: 14px; white-space: nowrap;">
+    <table class="transit-table" style="border-collapse: separate; border-spacing: 0;">
+        <colgroup>
+            <col style="width: 9%;"><col style="width: 7%;"><col style="width: 14%;"><col style="width: 5%;">
+            {% for plant in plants %}<col>{% endfor %}<col style="width: 7%;">
+        </colgroup>
         <thead>
             <tr style="background: #1f3a5f; color: white; text-align: left;">
-                <th style="padding: 8px 16px;">Commodity</th>
-                <th style="padding: 8px 16px;">Distance Left</th>
-                <th style="padding: 8px 16px;">Source Station Name</th>
-                <th style="padding: 8px 16px;">Source Code</th>
+                <th style="padding: 6px 8px;">Commodity</th>
+                <th style="padding: 6px 8px;">Distance Left</th>
+                <th style="padding: 6px 8px;">Source Station Name</th>
+                <th style="padding: 6px 8px;">Source Code</th>
                 {% for plant in plants %}
-                <th style="padding: 8px 16px; text-align: right;">{{ plant }}</th>
+                <th style="padding: 6px 8px; text-align: right;">{{ plant }}</th>
                 {% endfor %}
-                <th style="padding: 8px 16px; text-align: right;">Total</th>
+                <th style="padding: 6px 8px; text-align: right;">Total</th>
             </tr>
         </thead>
         {% for row in report.rows %}
@@ -91,13 +99,13 @@
             {% for source in slab.sources %}
             <tr style="border-bottom: 1px solid #e4e7eb;">
                 {% if first_slab and loop.first %}
-                <th scope="rowgroup" rowspan="{{ row.row_count }}" style="padding: 8px 16px; text-align: left; vertical-align: top; border-right: 1px solid #e4e7eb;">{{ row.commodity }}</th>
+                <th scope="rowgroup" rowspan="{{ row.row_count }}" style="padding: 6px 8px; text-align: left; vertical-align: top; border-right: 1px solid #e4e7eb;">{{ row.commodity }}</th>
                 {% endif %}
                 {% if loop.first %}
-                <td rowspan="{{ slab.sources|length }}" style="padding: 8px 16px; vertical-align: top; border-right: 1px solid #e4e7eb;">{{ slab.label }}</td>
+                <td rowspan="{{ slab.sources|length }}" style="padding: 6px 8px; vertical-align: top; border-right: 1px solid #e4e7eb;">{{ slab.label }}</td>
                 {% endif %}
-                <td style="padding: 8px 16px;">{{ source.name }}</td>
-                <td style="padding: 8px 16px;">{{ source.code }}</td>
+                <td style="padding: 6px 8px;">{{ source.name }}</td>
+                <td style="padding: 6px 8px;">{{ source.code }}</td>
                 {{ count_cells(source) }}
             </tr>
             {% endfor %}
@@ -105,26 +113,26 @@
             {% for source in row.by_source %}
             <tr class="by-source">
                 {% if loop.first %}
-                <td rowspan="{{ row.by_source|length }}" style="padding: 8px 16px; vertical-align: top; font-weight: bold;">Enroute by Source</td>
+                <td rowspan="{{ row.by_source|length }}" style="padding: 6px 8px; vertical-align: top; font-weight: bold;">Enroute by Source</td>
                 {% endif %}
-                <td style="padding: 8px 16px;">{{ source.name }}</td>
-                <td style="padding: 8px 16px;">{{ source.code }}</td>
+                <td style="padding: 6px 8px;">{{ source.name }}</td>
+                <td style="padding: 6px 8px;">{{ source.code }}</td>
                 {{ count_cells(source) }}
             </tr>
             {% endfor %}
             <tr class="commodity-total">
-                <td style="padding: 8px 16px;" colspan="3">Total</td>
+                <td style="padding: 6px 8px;" colspan="3">Total</td>
                 {{ count_cells(row.totals) }}
             </tr>
         </tbody>
         {% endfor %}
         <tfoot>
             <tr style="background: #1f3a5f; color: white; font-weight: bold;">
-                <td style="padding: 8px 16px;" colspan="4">All commodities</td>
+                <td style="padding: 6px 8px;" colspan="4">All commodities</td>
                 {% for plant in plants %}
-                <td style="padding: 8px 16px; text-align: right;">{{ report.totals.plants[plant] or '' }}{% if report.totals.stabled[plant] %} ({{ report.totals.stabled[plant] }} ST){% endif %}</td>
+                <td style="padding: 6px 8px; text-align: right;">{{ report.totals.plants[plant] or '' }}{% if report.totals.stabled[plant] %} <span style="white-space: nowrap;">({{ report.totals.stabled[plant] }} ST)</span>{% endif %}</td>
                 {% endfor %}
-                <td style="padding: 8px 16px; text-align: right;">{{ report.totals.total }}{% if report.totals.total_stabled %} ({{ report.totals.total_stabled }} ST){% endif %}</td>
+                <td style="padding: 6px 8px; text-align: right;">{{ report.totals.total }}{% if report.totals.total_stabled %} <span style="white-space: nowrap;">({{ report.totals.total_stabled }} ST)</span>{% endif %}</td>
             </tr>
         </tfoot>
     </table>
