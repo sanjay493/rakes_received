@@ -9,6 +9,25 @@
 {{ count_cell(line.total, line.total_stabled) }}
 {% endmacro %}
 
+{% macro plant_chips(line) %}
+<div class="tm-chips">
+    {% for plant in plants if line.plants[plant] %}
+    <span class="tm-chip">{{ plant }} <b>{{ line.plants[plant] }}</b>{% if line.stabled[plant] %} <span class="tm-st">({{ line.stabled[plant] }} ST)</span>{% endif %}</span>
+    {% endfor %}
+</div>
+{% endmacro %}
+
+{% macro line_total(line) %}
+<span class="tm-total">{{ line.total }}{% if line.total_stabled %} <span class="tm-st">({{ line.total_stabled }} ST)</span>{% endif %}</span>
+{% endmacro %}
+
+{% macro source_line(source) %}
+<div class="tm-source">
+    <div class="tm-source-head"><span>{{ source.name }}{% if source.name != source.code %} <span class="tm-code">({{ source.code }})</span>{% endif %}</span>{{ line_total(source) }}</div>
+    {{ plant_chips(source) }}
+</div>
+{% endmacro %}
+
 {% block content %}
 <style>
     .sticky-table thead th { position: sticky; top: 0; z-index: 2; background: #1f3a5f; }
@@ -22,6 +41,35 @@
     .transit-table { width: 100%; min-width: 1000px; table-layout: fixed; font-size: 13px; }
     .transit-table th, .transit-table td { white-space: normal; overflow-wrap: break-word; vertical-align: top; }
     .transit-table thead th { overflow-wrap: normal; }
+
+    /* Rakes in Transit on phones: a list instead of the 15-column table. */
+    .transit-mobile { display: none; }
+    @media (max-width: 700px) {
+        .transit-desktop { display: none; }
+        .transit-mobile { display: block; font-size: 14px; }
+    }
+    .tm-commodity { border: 1px solid #e4e7eb; border-radius: 6px; margin-bottom: 12px; }
+    /* The commodity name stays in view while scrolling through its rows. */
+    .tm-commodity-head { position: sticky; top: 0; z-index: 1; margin: 0; padding: 8px 10px; background: #1f3a5f; color: white;
+                         border-radius: 6px 6px 0 0; display: flex; justify-content: space-between; gap: 8px; }
+    .tm-commodity-head .tm-st { color: #ffb4ab; }
+    .tm-group { padding: 6px 10px; border-top: 1px solid #e4e7eb; }
+    .tm-group-head { font-weight: bold; color: #1f3a5f; margin: 2px 0 4px; }
+    .tm-by-source { background: #f5f8fb; }
+    .tm-source { padding: 5px 0; border-top: 1px dashed #e4e7eb; }
+    .tm-group-head + .tm-source { border-top: 0; }
+    .tm-source-head { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
+    .tm-code { color: #52606d; }
+    .tm-total { font-weight: bold; white-space: nowrap; }
+    .tm-st { color: #b42318; font-weight: bold; white-space: nowrap; }
+    .tm-chips { display: flex; flex-wrap: wrap; gap: 4px 6px; margin-top: 3px; }
+    .tm-chip { background: #e8eef5; border-radius: 4px; padding: 1px 6px; font-size: 13px; white-space: nowrap; }
+    .tm-commodity-total { padding: 8px 10px; background: #e8eef5; border-top: 2px solid #1f3a5f; font-weight: bold; border-radius: 0 0 6px 6px; }
+    .tm-commodity-total .tm-chip, .tm-grand-total .tm-chip { background: white; font-weight: normal; }
+    .tm-grand-total { padding: 8px 10px; background: #1f3a5f; color: white; border-radius: 6px; font-weight: bold; }
+    .tm-grand-total .tm-st { color: #ffb4ab; }
+    .tm-grand-total .tm-chip { color: #1f3a5f; }
+    .tm-grand-total .tm-chip .tm-st { color: #b42318; }
 </style>
 
 <div class="card">
@@ -70,10 +118,11 @@
 </div>
 
 {% if rakes %}
-<div class="card" style="overflow-x: auto;">
+<div class="card">
     <h3 style="margin-top: 0; margin-bottom: 4px;">Rakes in Transit{% if destination %} to {{ destination }}{% endif %}</h3>
     <p style="margin: 0 0 12px; color: #52606d;">As on {{ imported_at.strftime('%d-%m-%Y %H:%M') }} IST, when the data was received from FOIS</p>
     {% if report.rows %}
+    <div class="transit-desktop">
     {# Scrolls inside its own box, so the heading row stays in view while scrolling down. #}
     <div class="sticky-table" style="max-height: 75vh; overflow: auto; border: 1px solid #e4e7eb;">
     <table class="transit-table" style="border-collapse: separate; border-spacing: 0;">
@@ -137,6 +186,34 @@
             </tr>
         </tfoot>
     </table>
+    </div>
+    </div>
+
+    {# Phones: the same counts as a list, since 15 columns can't fit. Only plants with rakes are shown. #}
+    <div class="transit-mobile">
+        {% for row in report.rows %}
+        <section class="tm-commodity">
+            <h4 class="tm-commodity-head"><span>{{ row.commodity }}</span>{{ line_total(row.totals) }}</h4>
+            {% for slab in row.slabs %}
+            <div class="tm-group">
+                <div class="tm-group-head">{{ slab.label }}</div>
+                {% for source in slab.sources %}{{ source_line(source) }}{% endfor %}
+            </div>
+            {% endfor %}
+            <div class="tm-group tm-by-source">
+                <div class="tm-group-head">Enroute by Source</div>
+                {% for source in row.by_source %}{{ source_line(source) }}{% endfor %}
+            </div>
+            <div class="tm-commodity-total">
+                <div class="tm-source-head"><span>Total</span>{{ line_total(row.totals) }}</div>
+                {{ plant_chips(row.totals) }}
+            </div>
+        </section>
+        {% endfor %}
+        <div class="tm-grand-total">
+            <div class="tm-source-head"><span>All commodities</span>{{ line_total(report.totals) }}</div>
+            {{ plant_chips(report.totals) }}
+        </div>
     </div>
     {% else %}
     <p>No rakes in this list are going to the plants or pellet agents.</p>
