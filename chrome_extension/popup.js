@@ -71,8 +71,10 @@ async function send() {
       showStatus(result.error || `Server error (${response.status}).`, "error");
     } else if (table.report === "inbound") {
       showStatus(`Sent ${result.inserted} rakes. This is now the latest In-Bound list.`, "success");
-      if (result.missing_distances?.length) {
-        await chrome.storage.local.set({ pendingDistances: result.missing_distances });
+      const pendingDistances = result.missing_distances || [];
+      const pendingStations = result.missing_stations || [];
+      if (pendingDistances.length || pendingStations.length) {
+        await chrome.storage.local.set({ pendingDistances, pendingStations });
         await chrome.tabs.create({ url: "lookup.html" });
       }
     } else {

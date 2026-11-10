@@ -1,10 +1,10 @@
 {
   "manifest_version": 3,
   "name": "Rakes Received Exporter",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "description": "Sends the Rakes Received or Loaded In-Bound table on the open page to the Rakes Received dashboard when you click Send.",
   "permissions": ["activeTab", "scripting", "storage"],
-  "host_permissions": ["https://rakes-received.fly.dev/*", "https://rbs.indianrail.gov.in/*"],
+  "host_permissions": ["https://rakes-received.fly.dev/*", "https://rbs.indianrail.gov.in/*", "https://fois.indianrail.gov.in/*"],
   "action": {
     "default_title": "Send rake table",
     "default_popup": "popup.html"

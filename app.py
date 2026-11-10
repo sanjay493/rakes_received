@@ -150,6 +150,16 @@ INBOUND_HEADINGS = {
 IST = timezone(timedelta(hours=5, minutes=30))
 
 engine = create_engine(URL.create("sqlite", database=data_path("rake_data.db")))
+class StationLookup(Base):
+    """A station code whose name the Chrome extension looked up on FOIS Station Help, so it's only
+    asked once. name is empty when FOIS doesn't know the code. Found names also go into the station
+    mappings, which is what the pages show."""
+    __tablename__ = "station_lookups"
+
+    code = Column(String, primary_key=True)
+    name = Column(String)
+    fetched_at = Column(DateTime, nullable=False)
+
 Base.metadata.create_all(engine)
 SessionDB = sessionmaker(bind=engine)
 
@@ -256,6 +266,18 @@ def missing_distance_pairs(rakes, session):
         if all(pair) and pair[1] in INBOUND_DESTINATIONS and pair[0] != pair[1] and pair not in known:
             pairs.add(pair)
     return sorted(pairs)
+
+def missing_station_codes(rakes, session):
+    """Source and destination codes of rakes going to the plants or agents that have no name in the
+    station mappings and have never been looked up on FOIS."""
+    looked_up = {code for (code,) in session.query(StationLookup.code).all()}
+    codes = set()
+    for rake in rakes:
+        if station_code(rake.sttn_to) in INBOUND_DESTINATIONS:
+            codes.update(filter(None, (station_code(rake.sttn_from), station_code(rake.sttn_to))))
+    return sorted(code for code in codes if code not in station_mappings and code not in looked_up)
+
+MAX_STATION_NAME = 80
 
 def distance_left_km(rake, distances):
     """Km left for a rake using {(station, yard): km}, or None if it isn't known."""
@@ -618,6 +640,7 @@ def import_inbound():
     session = SessionDB()
     try:
         missing = missing_distance_pairs(records, session)
+        missing_names = missing_station_codes(records, session)
         session.add_all(records)
         session.commit()
     finally:
@@ -627,6 +650,7 @@ def import_inbound():
         received=len(rows),
         inserted=len(records),
         missing_distances=[{"from": start, "to": end} for start, end in missing],
+        missing_stations=missing_names,
     )
 
 @app.route("/api/distances", methods=["POST"])
@@ -660,6 +684,46 @@ def import_distances():
         session.close()
 
     return jsonify(saved=saved)
+
+@app.route("/api/station_names", methods=["POST"])
+def import_station_names():
+    """Save station names the extension read from FOIS Station Help: {"stations": [{"code", "name"}, ...]}.
+    An empty name means FOIS doesn't know the code, so it won't be looked up again. A name already in
+    the station mappings is kept, so names typed on the config page win."""
+    if not api_token_valid():
+        return jsonify(error="Invalid or missing API token"), 401
+
+    data = request.get_json(silent=True)
+    stations = data.get("stations") if isinstance(data, dict) else None
+    if not isinstance(stations, list):
+        return jsonify(error="Expected JSON with stations"), 400
+
+    fetched_at = datetime.now(IST).replace(tzinfo=None)
+    saved = 0
+    added = {}
+    session = SessionDB()
+    try:
+        for item in stations:
+            if not isinstance(item, dict):
+                continue
+            code, name = station_code(item.get("code")), item.get("name")
+            if isinstance(name, str):
+                name = " ".join(name.split())[:MAX_STATION_NAME] or None
+            elif name is not None:
+                continue
+            if code:
+                session.merge(StationLookup(code=code, name=name, fetched_at=fetched_at))
+                saved += 1
+                if name and code not in station_mappings:
+                    added[code] = name
+        session.commit()
+    finally:
+        session.close()
+
+    if added:
+        station_mappings.update(added)
+        save_mappings(STATION_MAPPINGS_FILE, station_mappings)
+    return jsonify(saved=saved, added=len(added))
 
 # ------------------ NEW: API ENDPOINTS FOR DYNAMIC FILTERS ------------------
 
