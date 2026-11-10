@@ -179,28 +179,29 @@ def add_report_sheet(workbook, data):
 
 
 def add_route_sheet(workbook, data):
-    sheet = workbook.create_sheet("Source to Destination")
+    sheet = workbook.create_sheet("Commodity Source Destination")
     routes = data["routes"]
-    first_date = 6  # After the source name and code, commodity, and destination name and code
+    first_date = 4  # After commodity, source and destination
     columns = first_date + len(routes["dates"])
-    headings = ["Source Station Name", "Source Code", "Commodity", "Destination Station Name", "Destination Code"]
+    headings = ["Commodity", "Source Station (Code)", "Destination Station (Code)"]
     for column, heading in enumerate([*headings, *routes["dates"], "Total"], 1):
         put_text(sheet, 1, column, heading)
     style_row(sheet, 1, columns, bold=True, fill=NAVY, color="FFFFFF")
 
+    def merge_down(row, count, column, value, bold=False):
+        cell = put_text(sheet, row, column, value)
+        cell.font = Font(bold=bold)
+        cell.alignment = Alignment(vertical="top", wrap_text=True)
+        if count > 1:
+            sheet.merge_cells(start_row=row, end_row=row + count - 1, start_column=column, end_column=column)
+
     row = 2
     for route in routes["rows"]:
+        if route["commodity_rows"]:
+            merge_down(row, route["commodity_rows"], 1, route["commodity"], bold=True)
         if route["source_rows"]:
-            for column, value in ((1, route["source_name"]), (2, route["source"])):
-                cell = put_text(sheet, row, column, value)
-                cell.font = Font(bold=column == 1)
-                cell.alignment = Alignment(vertical="top")
-                if route["source_rows"] > 1:
-                    sheet.merge_cells(start_row=row, end_row=row + route["source_rows"] - 1,
-                                      start_column=column, end_column=column)
-        put_text(sheet, row, 3, route["commodity"])
-        put_text(sheet, row, 4, route["destination_name"])
-        put_text(sheet, row, 5, route["destination"])
+            merge_down(row, route["source_rows"], 2, route["source"])
+        put_text(sheet, row, 3, route["destination"])
         for column, count in enumerate(route["counts"], first_date):
             sheet.cell(row=row, column=column, value=count or None)
         sheet.cell(row=row, column=columns, value=route["total"]).font = Font(bold=True)
@@ -213,7 +214,7 @@ def add_route_sheet(workbook, data):
         sheet.cell(row=row, column=columns, value=routes["total"])
         style_row(sheet, row, columns, bold=True, fill=NAVY, color="FFFFFF")
 
-    for column, width in enumerate([28, 10, 22, 28, 10], 1):
+    for column, width in enumerate([22, 34, 34], 1):
         sheet.column_dimensions[get_column_letter(column)].width = width
     for column in range(first_date, columns + 1):
         sheet.column_dimensions[get_column_letter(column)].width = 8
@@ -384,28 +385,34 @@ def report_table(data, styles):
 def route_table(data, styles):
     routes = data["routes"]
     rows = [[text_cell(heading, styles["cell_heading"]) for heading in
-             ["Source Station Name", "Source Code", "Commodity", "Destination Station Name", "Destination Code"]]
-            + [*routes["dates"], "Total"]]
+             ["Commodity", "Source Station (Code)", "Destination Station (Code)"]] + [*routes["dates"], "Total"]]
     spans = []
-    for route in routes["rows"]:
-        # A source's name and code are merged down its rows; every row holds them, for page breaks.
+    for index, route in enumerate(routes["rows"]):
+        # Every row holds the commodity and source; merging shows them once. Commodity blocks are built
+        # from whole source pieces, so the table can always break the page between blocks.
+        if route["commodity_rows"]:
+            commodity_cell = text_cell(route["commodity"], styles["cell_bold"])
+            group = routes["rows"][index:index + route["commodity_rows"]]
+            sources = [row["source_rows"] for row in group if row["source_rows"]]
+            spans += merge_blocks(0, len(rows), commodity_blocks(sources))
         if route["source_rows"]:
-            source_cells = (text_cell(route["source_name"], styles["cell_bold"]), route["source"])
-            spans += merged_down(0, len(rows), route["source_rows"]) + merged_down(1, len(rows), route["source_rows"])
-        rows.append([*source_cells,
-                     text_cell(route["commodity"], styles["cell"]), text_cell(route["destination_name"], styles["cell"]),
-                     route["destination"], *[count or "" for count in route["counts"]], route["total"]])
-    rows.append(["All routes", "", "", "", "", *[count or "" for count in routes["totals"]], routes["total"]])
+            source_cell = text_cell(route["source"], styles["cell"])
+            spans += merged_down(1, len(rows), route["source_rows"])
+        rows.append([commodity_cell, source_cell, text_cell(route["destination"], styles["cell"]),
+                     *[count or "" for count in route["counts"]], route["total"]])
+        if route["commodity_rows"]:
+            spans.append(("LINEABOVE", (0, len(rows) - 1), (-1, len(rows) - 1), 0.75, colors.HexColor(f"#{NAVY}")))
+    rows.append(["All routes", "", "", *[count or "" for count in routes["totals"]], routes["total"]])
     # Date columns share what is left of the 762 points inside the page frame.
     date_width = min(45, 412 / len(routes["dates"]))
-    table = Table(rows, colWidths=[90, 36, 80, 90, 36] + [date_width] * len(routes["dates"]) + [40],
+    table = Table(rows, colWidths=[80, 135, 135] + [date_width] * len(routes["dates"]) + [40],
                   repeatRows=1, hAlign="LEFT")
     table.setStyle(TableStyle(spans + [
         ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor(f"#{NAVY}")),
         ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
         ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
         ("FONTSIZE", (0, 0), (-1, -1), 8),
-        ("ALIGN", (5, 0), (-1, -1), "RIGHT"),
+        ("ALIGN", (3, 0), (-1, -1), "RIGHT"),
         ("LINEBELOW", (0, 0), (-1, -1), 0.25, colors.HexColor("#CBD2D9")),
         ("LEFTPADDING", (0, 0), (-1, -1), 3),
         ("RIGHTPADDING", (0, 0), (-1, -1), 3),
@@ -465,7 +472,7 @@ def build_pdf(data):
     if data["routes"]["rows"]:
         story.extend([
             PageBreak(),
-            Paragraph("Rakes by Source, Commodity, Destination and Loading Date", styles["heading"]),
+            Paragraph("Rakes by Commodity, Source, Destination and Loading Date", styles["heading"]),
             route_table(data, styles),
             Spacer(1, 6),
             Paragraph("Each date column (day-month) counts the rakes loaded that day, from LDNG TIME on FOIS.", styles["note"]),

@@ -330,12 +330,26 @@ def loading_date(value):
     return (1, first_word), first_word
 
 def station_label(code):
-    """(name, code) for a station code, with a dash for a blank one."""
-    return (get_station_display_name(code), code) if code else ("\u2014", "\u2014")
+    """ "NAME (CODE)" for a station code, just the code when it has no name, or a dash when blank."""
+    if not code:
+        return "\u2014"
+    name = get_station_display_name(code)
+    return f"{name} ({code})" if name and name != code else code
+
+def mark_runs(rows, field, key):
+    """On the first row of each run of rows with the same key(row), set field to the run's length;
+    0 on the rest. The page merges those cells."""
+    first = None
+    for row in rows:
+        row[field] = 0
+        if first is None or key(row) != key(first):
+            first = row
+        first[field] += 1
 
 def route_date_report(rakes):
-    """Count rakes by source, commodity, destination and loading date. Dates are columns, oldest first.
-    Rows run in source code order; source_rows on a source's first row is how many rows it has."""
+    """Count rakes by commodity, source, destination and loading date. Dates are columns, oldest first.
+    Commodities run alphabetically, then sources and destinations in code order, with a blank source last.
+    commodity_rows and source_rows on a run's first row say how many rows to merge."""
     counts = {}
     labels = {}
     for rake in rakes:
@@ -343,29 +357,22 @@ def route_date_report(rakes):
         destination = rake.sttn_to.strip().upper()
         key, label = loading_date(rake.ldng_time)
         labels[key] = label
-        counts.setdefault((source, commodity_name(rake.cmdt), destination), Counter())[key] += 1
+        counts.setdefault((commodity_name(rake.cmdt), source, destination), Counter())[key] += 1
 
     keys = sorted(labels)
     rows = []
-    # Rakes without a source station go last.
-    for (source, commodity, destination), dates in sorted(counts.items(), key=lambda item: (not item[0][0], item[0])):
-        source_name, source_code = station_label(source)
-        destination_name, destination_code = station_label(destination)
+    ordered = sorted(counts.items(), key=lambda item: (item[0][0], not item[0][1], item[0][1], item[0][2]))
+    for (commodity, source, destination), dates in ordered:
         rows.append({
-            "source": source_code,
-            "source_name": source_name,
-            "source_rows": 0,
             "commodity": commodity,
-            "destination": destination_code,
-            "destination_name": destination_name,
+            "source_code": source,
+            "source": station_label(source),
+            "destination": station_label(destination),
             "counts": [dates[key] for key in keys],
             "total": sum(dates.values()),
         })
-    first = None
-    for row in rows:
-        if first is None or row["source"] != first["source"]:
-            first = row
-        first["source_rows"] += 1
+    mark_runs(rows, "commodity_rows", lambda row: row["commodity"])
+    mark_runs(rows, "source_rows", lambda row: (row["commodity"], row["source_code"]))
     return {
         "dates": [labels[key] for key in keys],
         "rows": rows,

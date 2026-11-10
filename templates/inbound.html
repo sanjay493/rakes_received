@@ -138,15 +138,13 @@
 </div>
 
 <div class="card" style="overflow-x: auto;">
-    <h3 style="margin-top: 0;">Rakes by Source, Commodity, Destination and Loading Date{% if destination %} ({{ destination }}){% endif %}</h3>
+    <h3 style="margin-top: 0;">Rakes by Commodity, Source, Destination and Loading Date{% if destination %} ({{ destination }}){% endif %}</h3>
     <table style="border-collapse: collapse; font-size: 14px; white-space: nowrap;">
         <thead>
             <tr style="background: #1f3a5f; color: white; text-align: left;">
-                <th style="padding: 8px 16px;">Source Station Name</th>
-                <th style="padding: 8px 16px;">Source Code</th>
                 <th style="padding: 8px 16px;">Commodity</th>
-                <th style="padding: 8px 16px;">Destination Station Name</th>
-                <th style="padding: 8px 16px;">Destination Code</th>
+                <th style="padding: 8px 16px;">Source Station (Code)</th>
+                <th style="padding: 8px 16px;">Destination Station (Code)</th>
                 {% for date in routes.dates %}
                 <th style="padding: 8px 16px; text-align: right;">{{ date }}</th>
                 {% endfor %}
@@ -155,13 +153,13 @@
         </thead>
         <tbody>
             {% for route in routes.rows %}
-            <tr style="border-bottom: 1px solid #e4e7eb;">
+            <tr style="border-bottom: 1px solid #e4e7eb;{% if route.commodity_rows %} border-top: 2px solid #1f3a5f;{% endif %}">
+                {% if route.commodity_rows %}
+                <th scope="rowgroup" rowspan="{{ route.commodity_rows }}" style="padding: 8px 16px; text-align: left; vertical-align: top; border-right: 1px solid #e4e7eb;">{{ route.commodity }}</th>
+                {% endif %}
                 {% if route.source_rows %}
-                <td rowspan="{{ route.source_rows }}" style="padding: 8px 16px; vertical-align: top; font-weight: bold;">{{ route.source_name }}</td>
                 <td rowspan="{{ route.source_rows }}" style="padding: 8px 16px; vertical-align: top; border-right: 1px solid #e4e7eb;">{{ route.source }}</td>
                 {% endif %}
-                <td style="padding: 8px 16px;">{{ route.commodity }}</td>
-                <td style="padding: 8px 16px;">{{ route.destination_name }}</td>
                 <td style="padding: 8px 16px;">{{ route.destination }}</td>
                 {% for count in route.counts %}
                 <td style="padding: 8px 16px; text-align: right;">{{ count or '' }}</td>
@@ -172,7 +170,7 @@
         </tbody>
         <tfoot>
             <tr style="background: #1f3a5f; color: white; font-weight: bold;">
-                <td style="padding: 8px 16px;" colspan="5">All routes</td>
+                <td style="padding: 8px 16px;" colspan="3">All routes</td>
                 {% for count in routes.totals %}
                 <td style="padding: 8px 16px; text-align: right;">{{ count or '' }}</td>
                 {% endfor %}
