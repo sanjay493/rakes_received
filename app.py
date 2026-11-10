@@ -307,27 +307,43 @@ def loading_date(value):
     first_word = text.split()[0]
     return (1, first_word), first_word
 
+def station_label(code):
+    """(name, code) for a station code, with a dash for a blank one."""
+    return (get_station_display_name(code), code) if code else ("\u2014", "\u2014")
+
 def route_date_report(rakes):
-    """Count rakes by source, destination and loading date. Dates are columns, oldest first."""
+    """Count rakes by source, commodity, destination and loading date. Dates are columns, oldest first.
+    Rows run in source code order; source_rows on a source's first row is how many rows it has."""
     counts = {}
     labels = {}
     for rake in rakes:
-        source = (rake.sttn_from or "").strip().upper() or "\u2014"
+        source = (rake.sttn_from or "").strip().upper()
         destination = rake.sttn_to.strip().upper()
         key, label = loading_date(rake.ldng_time)
         labels[key] = label
-        counts.setdefault((source, destination), Counter())[key] += 1
+        counts.setdefault((source, commodity_name(rake.cmdt), destination), Counter())[key] += 1
 
     keys = sorted(labels)
-    rows = [
-        {
-            "source": source,
-            "destination": destination,
+    rows = []
+    # Rakes without a source station go last.
+    for (source, commodity, destination), dates in sorted(counts.items(), key=lambda item: (not item[0][0], item[0])):
+        source_name, source_code = station_label(source)
+        destination_name, destination_code = station_label(destination)
+        rows.append({
+            "source": source_code,
+            "source_name": source_name,
+            "source_rows": 0,
+            "commodity": commodity,
+            "destination": destination_code,
+            "destination_name": destination_name,
             "counts": [dates[key] for key in keys],
             "total": sum(dates.values()),
-        }
-        for (source, destination), dates in sorted(counts.items())
-    ]
+        })
+    first = None
+    for row in rows:
+        if first is None or row["source"] != first["source"]:
+            first = row
+        first["source_rows"] += 1
     return {
         "dates": [labels[key] for key in keys],
         "rows": rows,
