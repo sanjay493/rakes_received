@@ -49,7 +49,9 @@ if os.environ.get("REQUIRE_AUTH") == "1" and not APP_PASSWORD:
 @app.before_request
 def require_login():
     # The import endpoints check API_TOKEN themselves.
-    if not APP_PASSWORD or request.endpoint in ("healthz", "import_rakes", "import_inbound", "import_distances"):
+    if not APP_PASSWORD or request.endpoint in (
+        "healthz", "import_rakes", "import_inbound", "import_distances", "import_station_names",
+    ):
         return None
 
     auth = request.authorization
