@@ -43,11 +43,19 @@
     .transit-table thead th { overflow-wrap: normal; }
 
     /* Rakes in Transit on phones: a list instead of the 15-column table. */
-    .transit-mobile { display: none; }
+    .transit-mobile, .phone-only { display: none; }
     @media (max-width: 700px) {
-        .transit-desktop { display: none; }
-        .transit-mobile { display: block; font-size: 14px; }
+        .transit-desktop, .desk-only { display: none; }
+        .transit-mobile, .phone-only { display: block; font-size: 14px; }
     }
+    /* Rake Details on phones: one card per rake. */
+    .rd-card { border: 1px solid #e4e7eb; border-radius: 6px; padding: 8px 10px; margin-bottom: 8px; }
+    .rd-card.rd-stabled { background: #fef3f2; }
+    .rd-head { display: flex; justify-content: space-between; gap: 8px; font-weight: bold; color: #1f3a5f; margin-bottom: 4px; }
+    .rd-stabled .rd-status { color: #b42318; }
+    .rd-fields { display: grid; grid-template-columns: max-content 1fr; gap: 2px 10px; margin: 0; font-size: 13px; }
+    .rd-fields dt { color: #52606d; }
+    .rd-fields dd { margin: 0; overflow-wrap: anywhere; }
     .tm-commodity { border: 1px solid #e4e7eb; border-radius: 6px; margin-bottom: 12px; }
     /* The commodity name stays in view while scrolling through its rows. */
     .tm-commodity-head { position: sticky; top: 0; z-index: 1; margin: 0; padding: 8px 10px; background: #1f3a5f; color: white;
@@ -224,8 +232,9 @@
         It's available for {{ rakes_with_distance }} of {{ rakes|length }} rakes in the list; "Unknown" means it hasn't been looked up yet or the site doesn't know that location.    </p>
 </div>
 
-<div class="card" style="overflow-x: auto;">
+<div class="card">
     <h3 style="margin-top: 0;">Rakes by Commodity, Source, Destination and Loading Date{% if destination %} ({{ destination }}){% endif %}</h3>
+    <div class="desk-only">
     <div class="sticky-table" style="max-height: 75vh; overflow: auto; border: 1px solid #e4e7eb;">
     <table style="border-collapse: separate; border-spacing: 0; font-size: 14px; white-space: nowrap;">
         <thead>
@@ -267,13 +276,43 @@
         </tfoot>
     </table>
     </div>
+    </div>
+
+    {# Phones: commodity, then source, then each destination with its loading dates. #}
+    <div class="phone-only">
+        {% for group in routes.groups %}
+        <section class="tm-commodity">
+            <h4 class="tm-commodity-head"><span>{{ group.commodity }}</span><span class="tm-total">{{ group.total }}</span></h4>
+            {% for source in group.sources %}
+            <div class="tm-group">
+                <div class="tm-group-head tm-source-head"><span>{{ source.source }}</span><span class="tm-total">{{ source.total }}</span></div>
+                {% for route in source.rows %}
+                <div class="tm-source">
+                    <div class="tm-source-head"><span>&rarr; {{ route.destination }}</span><span class="tm-total">{{ route.total }}</span></div>
+                    <div class="tm-chips">
+                        {% for count in route.counts %}{% if count %}<span class="tm-chip">{{ routes.dates[loop.index0] }} <b>{{ count }}</b></span>{% endif %}{% endfor %}
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            {% endfor %}
+        </section>
+        {% endfor %}
+        <div class="tm-grand-total">
+            <div class="tm-source-head"><span>All routes</span><span class="tm-total">{{ routes.total }}</span></div>
+            <div class="tm-chips">
+                {% for count in routes.totals %}{% if count %}<span class="tm-chip">{{ routes.dates[loop.index0] }} <b>{{ count }}</b></span>{% endif %}{% endfor %}
+            </div>
+        </div>
+    </div>
     <p style="margin: 12px 0 0; font-size: 13px; color: #52606d;">
         Each date column (day-month) counts the rakes loaded that day, from LDNG TIME on FOIS.
     </p>
 </div>
 
-<div class="card" style="overflow-x: auto;">
+<div class="card">
     <h3 style="margin-top: 0;">Rake Details</h3>
+    <div class="desk-only">
     <div class="sticky-table" style="max-height: 75vh; overflow: auto; border: 1px solid #e4e7eb;">
     <table style="width: 100%; border-collapse: separate; border-spacing: 0; font-size: 13px; white-space: nowrap;">
         <thead>
@@ -315,6 +354,28 @@
             {% endfor %}
         </tbody>
     </table>
+    </div>
+    </div>
+
+    {# Phones: one card per rake instead of 14 columns. Stabled rakes are shaded. #}
+    <div class="phone-only">
+        {% for rake in rakes %}
+        <div class="rd-card{% if rake.stabled %} rd-stabled{% endif %}">
+            <div class="rd-head"><span>{{ rake.rake_id or '' }}</span><span class="rd-status">{{ rake.stts_code or '' }}{% if rake.stabled %} (stabled){% endif %}</span></div>
+            <dl class="rd-fields">
+                <dt>Load Name</dt><dd>{{ rake.load_name or '' }}</dd>
+                <dt>From &rarr; To</dt><dd>{{ rake.sttn_from or '' }} &rarr; {{ rake.sttn_to or '' }}</dd>
+                <dt>Commodity</dt><dd>{{ rake.commodity_name }}{% if rake.totl_unts %} ({{ rake.totl_unts }} units){% endif %}</dd>
+                <dt>Current Location</dt><dd>{{ rake.crnt_locn or '' }}</dd>
+                <dt>Km Left</dt><dd>{{ rake.distance_km|round|int if rake.distance_km is not none else '—' }}</dd>
+                <dt>Status Time</dt><dd>{{ rake.stts_time or '' }}</dd>
+                <dt>Dept Time</dt><dd>{{ rake.dept_time or '' }}</dd>
+                <dt>Transit Time</dt><dd>{{ rake.transit_time or '' }}</dd>
+                <dt>Expected Arrival</dt><dd>{{ rake.expd_arvl_time or '' }}</dd>
+                <dt>Loco No.</dt><dd>{{ rake.loco_no or '' }}</dd>
+            </dl>
+        </div>
+        {% endfor %}
     </div>
 </div>
 {% endif %}

@@ -375,9 +375,22 @@ def route_date_report(rakes):
         })
     mark_runs(rows, "commodity_rows", lambda row: row["commodity"])
     mark_runs(rows, "source_rows", lambda row: (row["commodity"], row["source_code"]))
+
+    # The same rows nested by commodity and source, with totals, for the phone list.
+    groups = []
+    for row in rows:
+        if row["commodity_rows"]:
+            groups.append({"commodity": row["commodity"], "total": 0, "sources": []})
+        if row["source_rows"]:
+            groups[-1]["sources"].append({"source": row["source"], "total": 0, "rows": []})
+        groups[-1]["total"] += row["total"]
+        groups[-1]["sources"][-1]["total"] += row["total"]
+        groups[-1]["sources"][-1]["rows"].append(row)
+
     return {
         "dates": [labels[key] for key in keys],
         "rows": rows,
+        "groups": groups,
         "totals": [sum(row["counts"][index] for row in rows) for index in range(len(keys))],
         "total": len(rakes),
     }
