@@ -16,6 +16,7 @@
     .sticky-table tr.by-source td { background: #f5f8fb; }
     .sticky-table tr.commodity-total td { background: #e8eef5; font-weight: bold; border-bottom: 2px solid #1f3a5f; }
     .sticky-table tfoot td { position: sticky; bottom: 0; background: #1f3a5f; }
+    .sticky-table tr.commodity-start td, .sticky-table tr.commodity-start th { border-top: 2px solid #1f3a5f; }
 </style>
 
 <div class="card">
@@ -139,7 +140,8 @@
 
 <div class="card" style="overflow-x: auto;">
     <h3 style="margin-top: 0;">Rakes by Commodity, Source, Destination and Loading Date{% if destination %} ({{ destination }}){% endif %}</h3>
-    <table style="border-collapse: collapse; font-size: 14px; white-space: nowrap;">
+    <div class="sticky-table" style="max-height: 75vh; overflow: auto; border: 1px solid #e4e7eb;">
+    <table style="border-collapse: separate; border-spacing: 0; font-size: 14px; white-space: nowrap;">
         <thead>
             <tr style="background: #1f3a5f; color: white; text-align: left;">
                 <th style="padding: 8px 16px;">Commodity</th>
@@ -153,7 +155,7 @@
         </thead>
         <tbody>
             {% for route in routes.rows %}
-            <tr style="border-bottom: 1px solid #e4e7eb;{% if route.commodity_rows %} border-top: 2px solid #1f3a5f;{% endif %}">
+            <tr{% if route.commodity_rows %} class="commodity-start"{% endif %}>
                 {% if route.commodity_rows %}
                 <th scope="rowgroup" rowspan="{{ route.commodity_rows }}" style="padding: 8px 16px; text-align: left; vertical-align: top; border-right: 1px solid #e4e7eb;">{{ route.commodity }}</th>
                 {% endif %}
@@ -178,6 +180,7 @@
             </tr>
         </tfoot>
     </table>
+    </div>
     <p style="margin: 12px 0 0; font-size: 13px; color: #52606d;">
         Each date column (day-month) counts the rakes loaded that day, from LDNG TIME on FOIS.
     </p>
