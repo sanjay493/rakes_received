@@ -3,6 +3,8 @@ import io
 from xml.sax.saxutils import escape
 
 from openpyxl import Workbook
+from openpyxl.cell.rich_text import CellRichText, TextBlock
+from openpyxl.cell.text import InlineFont
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 from reportlab.lib import colors
@@ -79,14 +81,27 @@ def put_text(sheet, row, column, value):
     return cell
 
 
-def put_count_line(sheet, row, column, line, plants):
-    """Write rakes and stabled counts as numbers, two columns per plant, then the totals."""
-    for plant in plants:
-        sheet.cell(row=row, column=column, value=line["plants"][plant] or None)
-        sheet.cell(row=row, column=column + 1, value=line["stabled"][plant] or None)
-        column += 2
-    sheet.cell(row=row, column=column, value=line["total"])
-    sheet.cell(row=row, column=column + 1, value=line["total_stabled"] or None)
+def put_count(sheet, row, column, rakes, stabled, plain=False):
+    """One count written like the page: "5", or "5 (2 ST)" with the stabled part in bold red.
+    plain leaves out the red, for the dark totals row."""
+    cell = sheet.cell(row=row, column=column)
+    if not rakes:
+        value = None
+    elif stabled and not plain:
+        value = CellRichText([f"{rakes} ", TextBlock(InlineFont(b=True, color=STABLED_TEXT), f"({stabled} ST)")])
+    elif stabled:
+        value = count_text(rakes, stabled)
+    else:
+        value = rakes  # A plain number, so Excel doesn't flag it as a number stored as text
+    cell.value = value
+    cell.alignment = Alignment(horizontal="right")
+
+
+def put_count_line(sheet, row, column, line, plants, plain=False):
+    """Write one count per plant or agent, then the total, like the page."""
+    for offset, plant in enumerate(plants):
+        put_count(sheet, row, column + offset, line["plants"][plant], line["stabled"][plant], plain)
+    put_count(sheet, row, column + len(plants), line["total"], line["total_stabled"], plain)
 
 
 def style_row(sheet, row, columns, bold=False, fill=None, color=None):
@@ -102,27 +117,19 @@ def add_report_sheet(workbook, data):
     sheet.title = "Rakes in Transit"
     plants = data["plants"]
     first_count = 5  # After Commodity, Distance Left, Source Station Name and Source Code
-    columns = first_count - 1 + 2 * (len(plants) + 1)
+    columns = first_count + len(plants)  # One column per plant or agent, then Total
     title, summary = title_lines(data)
 
     put_text(sheet, 1, 1, title).font = Font(bold=True, size=14)
     put_text(sheet, 2, 1, summary)
 
-    # Two header rows: each plant spans its Rakes and ST columns.
-    top, sub = 4, 5
-    for column, heading in enumerate(("Commodity", "Distance Left", "Source Station Name", "Source Code"), 1):
-        sheet.cell(row=top, column=column, value=heading)
-        sheet.merge_cells(start_row=top, end_row=sub, start_column=column, end_column=column)
-    for index, name in enumerate([*plants, "Total"]):
-        column = first_count + 2 * index
-        sheet.cell(row=top, column=column, value=name)
-        sheet.merge_cells(start_row=top, end_row=top, start_column=column, end_column=column + 1)
-        sheet.cell(row=sub, column=column, value="Rakes")
-        sheet.cell(row=sub, column=column + 1, value="ST")
-    for row in (top, sub):
-        style_row(sheet, row, columns, bold=True, fill=NAVY, color="FFFFFF")
-        for column in range(1, columns + 1):
-            sheet.cell(row=row, column=column).alignment = Alignment(horizontal="center", vertical="center")
+    header = 4
+    headings = ["Commodity", "Distance Left", "Source Station Name", "Source Code", *plants, "Total"]
+    for column, heading in enumerate(headings, 1):
+        put_text(sheet, header, column, heading)
+    style_row(sheet, header, columns, bold=True, fill=NAVY, color="FFFFFF")
+    for column in range(first_count, columns + 1):
+        sheet.cell(row=header, column=column).alignment = Alignment(horizontal="right")
 
     def merge_down(first_row, last_row, column, value, bold=False):
         """Write value once and merge it down the rows it covers, like the page does."""
@@ -137,7 +144,7 @@ def add_report_sheet(workbook, data):
         put_text(sheet, row, 4, source["code"])
         put_count_line(sheet, row, first_count, source, plants)
 
-    row = sub + 1
+    row = header + 1
     for commodity in data["report"]["rows"]:
         merge_down(row, row + commodity["row_count"] - 1, 1, commodity["commodity"], bold=True)
         for slab in commodity["slabs"]:
@@ -162,16 +169,9 @@ def add_report_sheet(workbook, data):
 
     if data["report"]["rows"]:
         put_text(sheet, row, 1, "All commodities")
-        put_count_line(sheet, row, first_count, data["report"]["totals"], plants)
+        put_count_line(sheet, row, first_count, data["report"]["totals"], plants, plain=True)
         style_row(sheet, row, columns, bold=True, fill=NAVY, color="FFFFFF")
         row += 1
-
-    # Stabled counts stand out, except on the dark totals row where red wouldn't be readable.
-    for body_row in range(sub + 1, row - 1):
-        for column in range(first_count + 1, columns + 1, 2):
-            sheet.cell(row=body_row, column=column).font = Font(
-                bold=sheet.cell(row=body_row, column=column).font.bold, color=STABLED_TEXT
-            )
 
     row += 1
     for note in NOTES:
@@ -183,8 +183,8 @@ def add_report_sheet(workbook, data):
     sheet.column_dimensions["C"].width = 28
     sheet.column_dimensions["D"].width = 10
     for column in range(first_count, columns + 1):
-        sheet.column_dimensions[get_column_letter(column)].width = 7
-    sheet.freeze_panes = sheet.cell(row=sub + 1, column=first_count)
+        sheet.column_dimensions[get_column_letter(column)].width = 10
+    sheet.freeze_panes = sheet.cell(row=header + 1, column=first_count)
 
 
 def add_route_sheet(workbook, data):
