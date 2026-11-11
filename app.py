@@ -1,4 +1,4 @@
-from flask import Flask, Response, render_template, request, redirect, send_file, jsonify
+from flask import Flask, Response, render_template, request, redirect, send_file, jsonify, url_for
 import pandas as pd
 import plotly.graph_objs as go
 import hmac, math, os, io, re, shutil, zipfile
@@ -974,6 +974,62 @@ def enroute_data():
 def enroute():
     """All-India en-route rakes from the latest all-India Loaded In-Bound list."""
     return render_template("enroute.html", **enroute_data())
+
+def counted(values):
+    """[(value, count)], most first."""
+    return sorted(Counter(values).items(), key=lambda kv: (-kv[1], kv[0]))
+
+@app.route("/enroute/rakes")
+def enroute_rakes():
+    """The rakes of one consigner (cnsr), one consignee (cnsg), or one pair, in the latest all-India list."""
+    cnsr = request.args.get("cnsr", "").strip().upper()
+    cnsg = request.args.get("cnsg", "").strip().upper()
+    if not cnsr and not cnsg:
+        return redirect(url_for("enroute"))
+
+    session = SessionDB()
+    try:
+        latest_at = session.query(func.max(InboundRake.imported_at)).filter(not_plant_list()).scalar()
+        rakes = (
+            session.query(InboundRake).filter(InboundRake.imported_at == latest_at).all() if latest_at else []
+        )
+    finally:
+        session.close()
+
+    rakes = [
+        rake for rake in rakes
+        if (not cnsr or party(rake.cnsr) == cnsr) and (not cnsg or party(rake.cnsg) == cnsg)
+    ]
+    for rake in rakes:
+        rake.loaded = loading_datetime(rake.ldng_time)
+        rake.source = station_label(station_code(rake.sttn_from))
+        rake.destination = station_label(station_code(rake.sttn_to))
+        rake.commodity_name = commodity_name(rake.cmdt)
+        rake.stabled = is_stabled(rake)
+    # Oldest loading first; rakes without a loading time last.
+    rakes.sort(key=lambda rake: (rake.loaded is None, rake.loaded or datetime.min, rake.id))
+
+    if cnsr and cnsg:
+        title = f"Rakes from consigner {cnsr} to consignee {cnsg}"
+    elif cnsr:
+        title = f"Rakes loaded by consigner {cnsr}"
+    else:
+        title = f"Rakes for consignee {cnsg}"
+    return render_template(
+        "enroute_rakes.html",
+        title=title,
+        cnsr=cnsr,
+        cnsg=cnsg,
+        imported_at=latest_at,
+        rakes=rakes,
+        stabled_count=sum(rake.stabled for rake in rakes),
+        # The other side is worth a breakdown only when one side is chosen.
+        by_party=counted(party(r.cnsg) for r in rakes) if not cnsg else counted(party(r.cnsr) for r in rakes) if not cnsr else [],
+        party_heading="consignee" if not cnsg else "consigner",
+        by_commodity=counted(r.commodity_name for r in rakes),
+        by_source=counted(r.source for r in rakes),
+        sail=SAIL_CONSIGNEE,
+    )
 
 def inbound_data(destination):
     """Everything the In-Bound page and its downloads show: the latest list's rakes going to the

@@ -1,12 +1,19 @@
 {% extends "base.html" %}
 
-{% macro chips(parties, highlight) %}
+{% macro chips(parties, highlight, link=none) %}
+{#- link: (own role, own code, chip role) to make each chip open the rakes of that pair. -#}
 <div class="chips">
-    {% for code, count in parties %}<span class="chip{% if code == highlight %} chip-sail{% endif %}" data-code="{{ code }}" data-count="{{ count }}">{{ code }} <b>{{ count }}</b></span>{% endfor %}
+    {% for code, count in parties %}
+    {%- if link and code != '—' -%}
+    <a class="chip{% if code == highlight %} chip-sail{% endif %}" data-code="{{ code }}" data-count="{{ count }}" href="{{ url_for('enroute_rakes', **{link[0]: link[1], link[2]: code}) }}" title="Rakes from {{ link[1] if link[0] == 'cnsr' else code }} to {{ code if link[0] == 'cnsr' else link[1] }}">{{ code }} <b>{{ count }}</b></a>
+    {%- else -%}
+    <span class="chip{% if code == highlight %} chip-sail{% endif %}" data-code="{{ code }}" data-count="{{ count }}">{{ code }} <b>{{ count }}</b></span>
+    {%- endif %}
+    {% endfor %}
 </div>
 {% endmacro %}
 
-{% macro party_table(id, rows, heading, partner_heading) %}
+{% macro party_table(id, rows, heading, partner_heading, role, partner_role) %}
 <input type="search" class="filter" data-table="{{ id }}" placeholder="Search codes, e.g. SAIL or SAIL TISC" aria-label="Search {{ heading }} or {{ partner_heading }}">
 <div class="scroll-box">
     <table class="party-table" id="{{ id }}">
@@ -20,9 +27,9 @@
         <tbody>
             {% for row in rows %}
             <tr{% if row.code == sail %} class="row-sail"{% endif %} data-code="{{ row.code }}" data-total="{{ row.total }}">
-                <th scope="row">{{ row.code }}</th>
+                <th scope="row">{% if row.code != '—' %}<a href="{{ url_for('enroute_rakes', **{role: row.code}) }}">{{ row.code }}</a>{% else %}{{ row.code }}{% endif %}</th>
                 <td class="num"><b class="row-total">{{ row.total }}</b></td>
-                <td>{{ chips(row.others, sail) }}</td>
+                <td>{{ chips(row.others, sail, (role, row.code, partner_role) if row.code != '—' else none) }}</td>
             </tr>
             {% endfor %}
         </tbody>
@@ -51,6 +58,9 @@
     .chips { display: flex; flex-wrap: wrap; gap: 4px 6px; }
     .chip { background: #e8eef5; border-radius: 4px; padding: 1px 6px; white-space: nowrap; }
     .chip[hidden] { display: none; }
+    a.chip { color: inherit; text-decoration: none; }
+    a.chip:hover, .party-table th[scope="row"] a:hover { background: #d0dce8; text-decoration: underline; }
+    .party-table th[scope="row"] a { color: #1f3a5f; }
     .chip-sail { background: #ffe082; font-weight: bold; }
     .filter { max-width: 320px; margin: 0 0 10px; }
     .summary { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
@@ -172,13 +182,13 @@
 <div class="two-col">
     <div class="card">
         <h3 style="margin-top: 0;">En-route Rakes by Consigner</h3>
-        {{ party_table("by-consigner", by_consigner, "Consigner", "Consignees") }}
-        <p class="note">Consigner is CNSR on FOIS; each row lists the consignees it is sending to.</p>
+        {{ party_table("by-consigner", by_consigner, "Consigner", "Consignees", "cnsr", "cnsg") }}
+        <p class="note">Consigner is CNSR on FOIS; each row lists the consignees it is sending to. Click a code to see its rakes, or a tag for just that pair.</p>
     </div>
     <div class="card">
         <h3 style="margin-top: 0;">En-route Rakes by Consignee</h3>
-        {{ party_table("by-consignee", by_consignee, "Consignee", "Consigners") }}
-        <p class="note">Consignee is CNSG on FOIS; each row lists the consigners sending to it.</p>
+        {{ party_table("by-consignee", by_consignee, "Consignee", "Consigners", "cnsg", "cnsr") }}
+        <p class="note">Consignee is CNSG on FOIS; each row lists the consigners sending to it. Click a code to see its rakes, or a tag for just that pair.</p>
     </div>
 </div>
 

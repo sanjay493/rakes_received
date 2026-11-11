@@ -1,0 +1,135 @@
+{% extends "base.html" %}
+
+{% macro breakdown(items) %}
+<div class="chips">
+    {% for label, count in items %}<span class="chip{% if label == sail %} chip-sail{% endif %}">{{ label }} <b>{{ count }}</b></span>{% endfor %}
+</div>
+{% endmacro %}
+
+{% macro party_link(role, code) %}
+{%- if code and code != '—' -%}
+<a href="{{ url_for('enroute_rakes', **{role: code}) }}">{{ code }}</a>
+{%- else -%}{{ code or '—' }}{%- endif -%}
+{% endmacro %}
+
+{% block content %}
+<style>
+    .scroll-box { max-height: 75vh; overflow: auto; border: 1px solid #e4e7eb; }
+    .scroll-box table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 13px; }
+    .scroll-box th, .scroll-box td { padding: 6px 8px; text-align: left; vertical-align: top; border-bottom: 1px solid #e4e7eb; overflow-wrap: break-word; }
+    .scroll-box thead th { position: sticky; top: 0; z-index: 2; background: #1f3a5f; color: white; }
+    .scroll-box .nowrap { white-space: nowrap; }
+    tr.stabled td { background: #fef3f2; }
+    .st { color: #b42318; font-weight: bold; }
+    .chips { display: flex; flex-wrap: wrap; gap: 4px 6px; }
+    .chip { background: #e8eef5; border-radius: 4px; padding: 1px 6px; white-space: nowrap; font-size: 13px; }
+    .chip-sail { background: #ffe082; font-weight: bold; }
+    .breakdowns { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px 20px; margin-top: 14px; }
+    .breakdowns h4 { margin: 0 0 6px; color: #1f3a5f; }
+    .summary { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
+    .summary div { background: #e8eef5; border-radius: 6px; padding: 8px 14px; }
+    .summary b { display: block; font-size: 20px; color: #1f3a5f; }
+    .back { display: inline-block; margin-bottom: 10px; }
+    /* Phones: one card per rake instead of the table. */
+    .phone-only { display: none; }
+    @media (max-width: 700px) {
+        .desk-only { display: none; }
+        .phone-only { display: block; }
+    }
+    .rd-card { border: 1px solid #e4e7eb; border-radius: 6px; padding: 8px 10px; margin-bottom: 8px; font-size: 14px; }
+    .rd-card.stabled { background: #fef3f2; }
+    .rd-head { display: flex; justify-content: space-between; gap: 8px; font-weight: bold; color: #1f3a5f; margin-bottom: 4px; }
+    .rd-fields { display: grid; grid-template-columns: max-content 1fr; gap: 2px 10px; margin: 0; font-size: 13px; }
+    .rd-fields dt { color: #52606d; }
+    .rd-fields dd { margin: 0; overflow-wrap: anywhere; }
+</style>
+
+<div class="card">
+    <a class="back" href="{{ url_for('enroute') }}">&larr; All-India page</a>
+    <h2 style="margin: 0;">{{ title }}</h2>
+    {% if imported_at %}
+    <p style="margin: 6px 0 0; color: #52606d;">From the all-India list received from FOIS on {{ imported_at.strftime('%d-%m-%Y %H:%M') }} IST.</p>
+    <div class="summary">
+        <div><b>{{ rakes|length }}</b>rakes en-route</div>
+        <div><b>{{ stabled_count }}</b>stabled (ST)</div>
+        {% if cnsr and cnsg %}
+        <div style="background: none; padding: 8px 0;">
+            Consigner {{ party_link('cnsr', cnsr) }} &middot; Consignee {{ party_link('cnsg', cnsg) }}
+        </div>
+        {% endif %}
+    </div>
+    {% if rakes %}
+    <div class="breakdowns">
+        {% if by_party %}<div><h4>By {{ party_heading }}</h4>{{ breakdown(by_party) }}</div>{% endif %}
+        <div><h4>By commodity</h4>{{ breakdown(by_commodity) }}</div>
+        <div><h4>By loading station</h4>{{ breakdown(by_source) }}</div>
+    </div>
+    {% endif %}
+    {% else %}
+    <p>No all-India list has been received yet.</p>
+    {% endif %}
+</div>
+
+{% if rakes %}
+<div class="card">
+    <h3 style="margin-top: 0;">Rake Details</h3>
+    <div class="desk-only">
+        <div class="scroll-box">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Loaded</th>
+                        <th>From</th>
+                        <th>To</th>
+                        {% if not cnsr %}<th>Consigner</th>{% endif %}
+                        {% if not cnsg %}<th>Consignee</th>{% endif %}
+                        <th>Commodity</th>
+                        <th>Units</th>
+                        <th>Rake ID</th>
+                        <th>Current Location</th>
+                        <th>Status</th>
+                        <th>Expected Arrival</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for rake in rakes %}
+                    <tr{% if rake.stabled %} class="stabled"{% endif %}>
+                        <td class="nowrap">{{ rake.ldng_time or '—' }}</td>
+                        <td>{{ rake.source }}</td>
+                        <td>{{ rake.destination }}</td>
+                        {% if not cnsr %}<td>{{ party_link('cnsr', rake.cnsr) }}</td>{% endif %}
+                        {% if not cnsg %}<td>{{ party_link('cnsg', rake.cnsg) }}</td>{% endif %}
+                        <td>{{ rake.commodity_name }}</td>
+                        <td class="nowrap">{{ rake.totl_unts or '' }}</td>
+                        <td class="nowrap">{{ rake.rake_id or '' }}</td>
+                        <td>{{ rake.crnt_locn or '' }}</td>
+                        <td class="nowrap{% if rake.stabled %} st{% endif %}">{{ rake.stts_code or '' }}{% if rake.stabled %} (stabled){% endif %}</td>
+                        <td class="nowrap">{{ rake.expd_arvl_time or '' }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    <div class="phone-only">
+        {% for rake in rakes %}
+        <div class="rd-card{% if rake.stabled %} stabled{% endif %}">
+            <div class="rd-head"><span>{{ rake.ldng_time or 'No loading time' }}</span><span{% if rake.stabled %} class="st"{% endif %}>{{ rake.stts_code or '' }}{% if rake.stabled %} (stabled){% endif %}</span></div>
+            <dl class="rd-fields">
+                <dt>From &rarr; To</dt><dd>{{ rake.source }} &rarr; {{ rake.destination }}</dd>
+                {% if not cnsr %}<dt>Consigner</dt><dd>{{ party_link('cnsr', rake.cnsr) }}</dd>{% endif %}
+                {% if not cnsg %}<dt>Consignee</dt><dd>{{ party_link('cnsg', rake.cnsg) }}</dd>{% endif %}
+                <dt>Commodity</dt><dd>{{ rake.commodity_name }}{% if rake.totl_unts %} ({{ rake.totl_unts }} units){% endif %}</dd>
+                <dt>Rake ID</dt><dd>{{ rake.rake_id or '' }}</dd>
+                <dt>Current Location</dt><dd>{{ rake.crnt_locn or '' }}</dd>
+                <dt>Expected Arrival</dt><dd>{{ rake.expd_arvl_time or '' }}</dd>
+            </dl>
+        </div>
+        {% endfor %}
+    </div>
+    <p style="margin: 10px 0 0; font-size: 13px; color: #52606d;">
+        Oldest loading first. Stabled rakes (status ST) are shaded. Click a consigner or consignee code to see its rakes.
+    </p>
+</div>
+{% endif %}
+{% endblock %}
