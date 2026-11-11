@@ -2,12 +2,12 @@
 
 {% macro chips(parties, highlight) %}
 <div class="chips">
-    {% for code, count in parties %}<span class="chip{% if code == highlight %} chip-sail{% endif %}">{{ code }} <b>{{ count }}</b></span>{% endfor %}
+    {% for code, count in parties %}<span class="chip{% if code == highlight %} chip-sail{% endif %}" data-code="{{ code }}" data-count="{{ count }}">{{ code }} <b>{{ count }}</b></span>{% endfor %}
 </div>
 {% endmacro %}
 
 {% macro party_table(id, rows, heading, partner_heading) %}
-<input type="search" class="filter" data-table="{{ id }}" placeholder="Filter by code, e.g. SAIL" aria-label="Filter {{ heading }}">
+<input type="search" class="filter" data-table="{{ id }}" placeholder="Search codes, e.g. SAIL or SAIL TISC" aria-label="Search {{ heading }} or {{ partner_heading }}">
 <div class="scroll-box">
     <table class="party-table" id="{{ id }}">
         <thead>
@@ -19,17 +19,17 @@
         </thead>
         <tbody>
             {% for row in rows %}
-            <tr{% if row.code == sail %} class="row-sail"{% endif %} data-search="{{ row.code }} {% for code, _ in row.others %}{{ code }} {% endfor %}">
+            <tr{% if row.code == sail %} class="row-sail"{% endif %} data-code="{{ row.code }}" data-total="{{ row.total }}">
                 <th scope="row">{{ row.code }}</th>
-                <td class="num"><b>{{ row.total }}</b></td>
+                <td class="num"><b class="row-total">{{ row.total }}</b></td>
                 <td>{{ chips(row.others, sail) }}</td>
             </tr>
             {% endfor %}
         </tbody>
         <tfoot>
             <tr>
-                <td>All ({{ rows|length }})</td>
-                <td class="num">{{ total }}</td>
+                <td class="foot-label" data-all="All ({{ rows|length }})">All ({{ rows|length }})</td>
+                <td class="num foot-total" data-all="{{ total }}">{{ total }}</td>
                 <td></td>
             </tr>
         </tfoot>
@@ -50,6 +50,7 @@
     .row-sail th, .row-sail td { background: #fff8e1; }
     .chips { display: flex; flex-wrap: wrap; gap: 4px 6px; }
     .chip { background: #e8eef5; border-radius: 4px; padding: 1px 6px; white-space: nowrap; }
+    .chip[hidden] { display: none; }
     .chip-sail { background: #ffe082; font-weight: bold; }
     .filter { max-width: 320px; margin: 0 0 10px; }
     .summary { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
@@ -182,15 +183,42 @@
 </div>
 
 <script>
-    // Filter a party table by any code in the row (the party itself or its partners).
+    // Search a party table by code. A row whose own code matches shows in full. A row that matches only
+    // through the other side (e.g. a consigner sending to the searched consignee) shows just the matching
+    // tags, and its Rakes count and the footer add up only those rakes. Several codes can be typed,
+    // separated by spaces, and part of a code matches.
     document.querySelectorAll(".filter").forEach((input) => {
-        const rows = [...document.getElementById(input.dataset.table).tBodies[0].rows];
+        const table = document.getElementById(input.dataset.table);
+        const rows = [...table.tBodies[0].rows];
+        const footLabel = table.querySelector(".foot-label");
+        const footTotal = table.querySelector(".foot-total");
         input.addEventListener("input", () => {
-            const words = input.value.trim().toUpperCase().split(/\s+/).filter(Boolean);
+            const words = input.value.trim().toUpperCase().split(/[\s,]+/).filter(Boolean);
+            const matches = (code) => words.some((word) => code.includes(word));
+            let shownRows = 0;
+            let shownRakes = 0;
             rows.forEach((row) => {
-                const text = " " + row.dataset.search + " ";
-                row.hidden = words.length > 0 && !words.every((word) => text.includes(word));
+                const chips = [...row.querySelectorAll(".chip")];
+                const ownMatch = !words.length || matches(row.dataset.code);
+                let rakes = Number(row.dataset.total);
+                if (ownMatch) {
+                    chips.forEach((chip) => { chip.hidden = false; });
+                } else {
+                    rakes = 0;
+                    chips.forEach((chip) => {
+                        chip.hidden = !matches(chip.dataset.code);
+                        if (!chip.hidden) rakes += Number(chip.dataset.count);
+                    });
+                }
+                row.hidden = rakes === 0;
+                row.querySelector(".row-total").textContent = rakes;
+                if (!row.hidden) {
+                    shownRows += 1;
+                    shownRakes += rakes;
+                }
             });
+            footLabel.textContent = words.length ? `Shown (${shownRows})` : footLabel.dataset.all;
+            footTotal.textContent = words.length ? shownRakes : footTotal.dataset.all;
         });
     });
 </script>
