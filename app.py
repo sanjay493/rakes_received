@@ -50,7 +50,7 @@ if os.environ.get("REQUIRE_AUTH") == "1" and not APP_PASSWORD:
 def require_login():
     # The import endpoints check API_TOKEN themselves.
     if not APP_PASSWORD or request.endpoint in (
-        "healthz", "import_rakes", "import_inbound", "import_enroute", "import_distances", "import_station_names",
+        "healthz", "import_rakes", "import_inbound", "import_distances", "import_station_names",
     ):
         return None
 
@@ -95,8 +95,10 @@ class Rake(Base):
         UniqueConstraint("received_time", "sttn_from", "sttn_to","cmdt","rake_type","dispatched_time", name="uq_rake_time_to_from_cmdt_type"),
     )
 
-class RakeListColumns:
-    """The columns of a FOIS Loaded In-Bound report, shared by the SAIL and all-India lists."""
+class InboundRake(Base):
+    """One row of a FOIS Loaded In-Bound report. Each import adds a new list; times stay as FOIS shows them."""
+    __tablename__ = "inbound_rakes"
+
     id = Column(Integer, primary_key=True)
     imported_at = Column(DateTime, index=True, nullable=False)
 
@@ -124,16 +126,6 @@ class RakeListColumns:
     loco_no = Column(String)
     loco_type = Column(String)
     expd_arvl_time = Column(String)
-
-class InboundRake(RakeListColumns, Base):
-    """One row of a FOIS Loaded In-Bound report for the SAIL plants and agents, shown on the In-Bound page.
-    Each import adds a new list; times stay as FOIS shows them."""
-    __tablename__ = "inbound_rakes"
-
-class EnrouteRake(RakeListColumns, Base):
-    """One row of the all-India Loaded In-Bound Rake list from FOIS e-Customer, shown only on the
-    All-India page. Kept apart from the SAIL In-Bound lists so neither affects the other."""
-    __tablename__ = "enroute_rakes"
 
 class RailDistance(Base):
     """Goods distance from a station to a plant yard, looked up once on the Railways' RBS site by
@@ -285,13 +277,15 @@ def missing_distance_pairs(rakes, session):
     return sorted(pairs)
 
 def missing_station_codes(rakes, session):
-    """Source and destination codes of rakes going to the plants or agents that have no name in the
-    station mappings and have never been looked up on FOIS."""
+    """Codes with no name in the station mappings that have never been looked up on FOIS: the source and
+    destination of rakes to the plants or agents, and the source of any rake for consignee SAIL."""
     looked_up = {code for (code,) in session.query(StationLookup.code).all()}
     codes = set()
     for rake in rakes:
         if station_code(rake.sttn_to) in INBOUND_DESTINATIONS:
             codes.update(filter(None, (station_code(rake.sttn_from), station_code(rake.sttn_to))))
+        elif is_sail(rake.cnsg) and station_code(rake.sttn_from):
+            codes.add(station_code(rake.sttn_from))
     return sorted(code for code in codes if code not in station_mappings and code not in looked_up)
 
 MAX_STATION_NAME = 80
@@ -661,53 +655,30 @@ def import_rakes():
     inserted, skipped = insert_cleaned_data(df_clean)
     return jsonify(received=len(df_raw), inserted=inserted, skipped=skipped)
 
-def read_rake_list(model):
-    """Read a Loaded In-Bound table from the request as new model rows, all with one import time.
-    Returns (records, rows received, None), or (None, None, error response)."""
+@app.route("/api/inbound", methods=["POST"])
+def import_inbound():
+    """Save a Loaded In-Bound table as the latest list of rakes on the way."""
     data, error = read_import_request()
     if error:
-        return None, None, error
+        return error
 
     columns = data["columns"]
     rows = data["rows"]
     if not isinstance(columns, list) or not isinstance(rows, list):
-        return None, None, (jsonify(error="Expected JSON with columns and rows"), 400)
+        return jsonify(error="Expected JSON with columns and rows"), 400
 
     fields = [INBOUND_HEADINGS.get(re.sub(r"[\s._]", "", str(c).lower())) for c in columns]
     if "rake_id" not in fields or "sttn_to" not in fields:
-        return None, None, (jsonify(error="Could not read the table: RAKE ID and STTN TO are required"), 400)
+        return jsonify(error="Could not read the table: RAKE ID and STTN TO are required"), 400
 
     imported_at = datetime.now(IST).replace(tzinfo=None)
     records = [
-        model(imported_at=imported_at, **{f: v for f, v in zip(fields, row) if f})
+        InboundRake(imported_at=imported_at, **{f: v for f, v in zip(fields, row) if f})
         for row in rows
         if isinstance(row, list) and len(row) == len(columns)
     ]
     if not records:
-        return None, None, (jsonify(error="The table has no usable rows"), 400)
-    return records, len(rows), None
-
-@app.route("/api/enroute", methods=["POST"])
-def import_enroute():
-    """Save the all-India Loaded In-Bound Rake list for the All-India page. It doesn't touch the
-    SAIL In-Bound lists, and starts no station or distance lookups."""
-    records, received, error = read_rake_list(EnrouteRake)
-    if error:
-        return error
-    session = SessionDB()
-    try:
-        session.add_all(records)
-        session.commit()
-    finally:
-        session.close()
-    return jsonify(received=received, inserted=len(records))
-
-@app.route("/api/inbound", methods=["POST"])
-def import_inbound():
-    """Save a Loaded In-Bound table as the latest list of rakes on the way."""
-    records, received, error = read_rake_list(InboundRake)
-    if error:
-        return error
+        return jsonify(error="The table has no usable rows"), 400
 
     session = SessionDB()
     try:
@@ -719,7 +690,7 @@ def import_inbound():
         session.close()
 
     return jsonify(
-        received=received,
+        received=len(rows),
         inserted=len(records),
         missing_distances=[{"from": start, "to": end} for start, end in missing],
         missing_stations=missing_names,
@@ -898,6 +869,11 @@ def loading_datetime(value):
             pass
     return None
 
+def not_plant_list():
+    """SQL condition for a rake going somewhere other than the plants and agents. A list with any such
+    rake is an all-India list, rather than one filtered to the SAIL plants."""
+    return ~func.upper(func.trim(func.coalesce(InboundRake.sttn_to, ""))).in_(list(INBOUND_DESTINATIONS))
+
 def party_report(rakes, key, other):
     """Rakes per key party (consigner or consignee), most first, each with the other parties as
     [(code, rakes)], most first."""
@@ -918,9 +894,9 @@ def shared_source_report(session, latest_at):
     end = latest_at.date()
     start = end - timedelta(days=SHARED_SOURCE_DAYS - 1)
     rows = (
-        session.query(EnrouteRake.rake_id, EnrouteRake.load_name, EnrouteRake.sttn_from,
-                      EnrouteRake.cnsg, EnrouteRake.ldng_time, EnrouteRake.imported_at)
-        .filter(EnrouteRake.imported_at >= datetime.combine(start, datetime.min.time()))
+        session.query(InboundRake.rake_id, InboundRake.load_name, InboundRake.sttn_from,
+                      InboundRake.cnsg, InboundRake.ldng_time, InboundRake.imported_at)
+        .filter(InboundRake.imported_at >= datetime.combine(start, datetime.min.time()))
         .all()
     )
     loadings = {}
@@ -971,12 +947,12 @@ def enroute_data():
     """The latest all-India list, by consigner and by consignee, and the shared-source table."""
     session = SessionDB()
     try:
-        latest_at = session.query(func.max(EnrouteRake.imported_at)).scalar()
+        latest_at = session.query(func.max(InboundRake.imported_at)).filter(not_plant_list()).scalar()
         if not latest_at:
             return {"imported_at": None}
         rakes = (
-            session.query(EnrouteRake.cnsr, EnrouteRake.cnsg)
-            .filter(EnrouteRake.imported_at == latest_at)
+            session.query(InboundRake.cnsr, InboundRake.cnsg)
+            .filter(InboundRake.imported_at == latest_at)
             .all()
         )
         shared = shared_source_report(session, latest_at)

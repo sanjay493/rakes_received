@@ -11,8 +11,6 @@
     input { box-sizing: border-box; width: 100%; margin-bottom: 10px; padding: 6px; }
     button { width: 100%; padding: 8px; font: inherit; font-weight: 600; cursor: pointer; }
     button:disabled { cursor: default; }
-    button + button { margin-top: 8px; }
-    [hidden] { display: none; }
     .error { color: #b42318; }
     .success { color: #05603a; }
     .note { margin: 10px 0 0; font-size: 12px; color: #52606d; }
@@ -24,7 +22,6 @@
   <label for="token">API token</label>
   <input id="token" type="password" autocomplete="off">
   <button id="send" disabled>Send to dashboard</button>
-  <button id="send-enroute" hidden disabled>Send to All-India</button>
   <p class="note">Sends only the report table, to rakes-received.fly.dev, and only when you click Send.</p>
   <script src="extract.js"></script>
   <script src="popup.js"></script>

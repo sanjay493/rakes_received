@@ -86,13 +86,12 @@
     {% else %}
     <p style="margin-bottom: 0;">
         No all-India list has been received yet. Open the Loaded In-Bound Rake report on FOIS e-Customer
-        (InBundLRake.jsp), load the all-India list, select Show All, and send it with the Chrome extension's
-        Send to All-India button.
+        (InBundLRake.jsp), load the all-India list, select Show All, and send it with the Chrome extension.
     </p>
     {% endif %}
     <p class="note">
-        Send the all-India list with the Chrome extension's <strong>Send to All-India</strong> button. This page is kept
-        separate from the SAIL reports: all-India lists don't change the In-Bound page, and SAIL lists don't change this page.
+        Send the all-India list with the Chrome extension, the same way as the Loaded In-Bound report. It also
+        updates the <a href="{{ url_for('inbound') }}">In-Bound</a> page, which shows only the rakes to the SAIL plants and pellet agents.
     </p>
 </div>
 
@@ -164,7 +163,7 @@
     <p>No rakes for consignee {{ sail }} were loaded in these {{ days }} days.</p>
     {% endif %}
     <p class="note">
-        Every all-India list sent in these {{ days }} days counts, so rakes already delivered are still included; a rake that
+        Every list sent in these {{ days }} days counts, so rakes already delivered are still included; a rake that
         appears in several lists is counted once, by Rake ID and loading time (LDNG TIME). {{ sail }} means consignee (CNSG) {{ sail }}.
     </p>
 </div>
