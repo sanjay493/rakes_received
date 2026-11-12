@@ -570,7 +570,7 @@ def insert_cleaned_data(df):
         session.close()
 
     skipped = total - inserted
-    print(f"Upload summary → Inserted: {inserted}  Skipped/duplicates: {skipped}")
+    print(f"Upload summary -> Inserted: {inserted}  Skipped/duplicates: {skipped}")
     return inserted, skipped
 
 def fallback_insert(session, records):
