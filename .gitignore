@@ -1,3 +1,8 @@
 # Ignore virtual environment folder
 .venv/
 venv/
+# Data lives outside git: back up and restore it with db_sync.py (Google Drive)
+rake_data.db
+rake_data_before_restore.db
+
+__pycache__/
