@@ -1,8 +1,8 @@
 const RBS_URL = "https://rbs.indianrail.gov.in/ShortPath/ShortPathServlet";
 const FOIS_STATION_URL = "https://fois.indianrail.gov.in/FOISWebPortal/FWP_SttnHelp";
-const DISTANCES_URL = "https://rakes-received.fly.dev/api/distances";
-const STATIONS_URL = "https://rakes-received.fly.dev/api/station_names";
-const INBOUND_PAGE = "https://rakes-received.fly.dev/inbound";
+const DISTANCES_URL = "http://127.0.0.1:5000/api/distances";
+const STATIONS_URL = "http://127.0.0.1:5000/api/station_names";
+const INBOUND_PAGE = "http://127.0.0.1:5000/inbound";
 
 const DELAY_MS = 1500; // Pause between lookups, to go easy on the Railways' site
 const SAVE_EVERY = 10; // Save this often, so closing the tab loses little

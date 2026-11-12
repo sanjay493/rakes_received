@@ -1,6 +1,6 @@
 const REPORTS = {
-  received: { label: "Rakes Received", url: "https://rakes-received.fly.dev/api/rakes" },
-  inbound: { label: "Loaded In-Bound", url: "https://rakes-received.fly.dev/api/inbound" },
+  received: { label: "Rakes Received", url: "http://127.0.0.1:5000/api/rakes" },
+  inbound: { label: "Loaded In-Bound", url: "http://127.0.0.1:5000/api/inbound" },
 };
 
 const statusEl = document.getElementById("status");
