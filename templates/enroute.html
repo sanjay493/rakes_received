@@ -82,6 +82,14 @@
     .ss-card { border: 1px solid #e4e7eb; border-radius: 6px; padding: 8px 10px; margin-bottom: 8px; font-size: 14px; }
     .ss-head { display: flex; justify-content: space-between; gap: 8px; font-weight: bold; color: #1f3a5f; margin-bottom: 4px; }
     .ss-counts { margin-bottom: 4px; }
+    /* Date-wise table: the two header rows stay on top together, and the source column stays on the left. */
+    .date-table thead { position: sticky; top: 0; z-index: 3; }
+    .scroll-box .date-table thead th { position: static; text-align: center; white-space: nowrap; border-left: 1px solid #3d5a80; }
+    .scroll-box .date-table thead th:first-child { position: sticky; left: 0; text-align: left; border-left: 0; }
+    .date-table tbody td:first-child { position: sticky; left: 0; z-index: 1; background: white; white-space: nowrap; }
+    .scroll-box .date-table tfoot td:first-child { left: 0; z-index: 2; white-space: nowrap; }
+    .date-table td.day-sail, .date-table td.day-total { border-left: 1px solid #e4e7eb; }
+    .date-table tbody td.day-sail { background: #fff8e1; font-weight: bold; }
 </style>
 
 <div class="card">
@@ -178,6 +186,68 @@
         appears in several lists is counted once, by Rake ID and loading time (LDNG TIME). {{ sail }} means consignee (CNSG) {{ sail }}.
     </p>
 </div>
+
+{% if shared.rows %}
+<div class="card">
+    <h3 style="margin-top: 0; margin-bottom: 4px;">Date-wise Loading (Last {{ days }} Days): {{ sail }} and Others from Sources Loading for {{ sail }}</h3>
+    <p style="margin: 0 0 12px; color: #52606d;">
+        Rakes loaded on each date, {{ shared.start.strftime('%d-%m-%Y') }} to {{ shared.end.strftime('%d-%m-%Y') }}, at the
+        {{ shared.rows|length }} stations that loaded for consignee {{ sail }}. The loading date is the date in LDNG TIME.
+    </p>
+    <div class="scroll-box">
+        <table class="date-table">
+            <thead>
+                <tr>
+                    <th rowspan="2">Source Station (Code)</th>
+                    {% for day in shared.dates %}
+                    <th colspan="2">{{ day.strftime('%d-%m-%Y') }}<br>{{ day.strftime('%a') }}</th>
+                    {% endfor %}
+                    <th colspan="3">Total</th>
+                </tr>
+                <tr>
+                    {% for day in shared.dates %}
+                    <th>{{ sail }}</th>
+                    <th>Others</th>
+                    {% endfor %}
+                    <th>{{ sail }}</th>
+                    <th>Others</th>
+                    <th>All</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in shared.rows %}
+                <tr>
+                    <td>{{ row.source }}</td>
+                    {% for sail_count, other_count in row.daily %}
+                    <td class="num day-sail">{{ sail_count or '' }}</td>
+                    <td class="num">{{ other_count or '' }}</td>
+                    {% endfor %}
+                    <td class="num day-total"><b>{{ row.sail }}</b></td>
+                    <td class="num">{{ row.others or '' }}</td>
+                    <td class="num"><b>{{ row.total }}</b></td>
+                </tr>
+                {% endfor %}
+            </tbody>
+            <tfoot>
+                <tr>
+                    <td>All sources ({{ shared.rows|length }})</td>
+                    {% for sail_count, other_count in shared.daily %}
+                    <td class="num">{{ sail_count }}</td>
+                    <td class="num">{{ other_count }}</td>
+                    {% endfor %}
+                    <td class="num">{{ shared.sail }}</td>
+                    <td class="num">{{ shared.others }}</td>
+                    <td class="num">{{ shared.total }}</td>
+                </tr>
+            </tfoot>
+        </table>
+    </div>
+    <p class="note">
+        Same rakes and sources as the table above, split by loading date. A blank cell means no rake was loaded.
+        {% if shared.history_from %}Dates before {{ shared.history_from.strftime('%d-%m-%Y') }} are incomplete, as lists were not yet being kept.{% endif %}
+    </p>
+</div>
+{% endif %}
 
 <div class="two-col">
     <div class="card">

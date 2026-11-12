@@ -889,7 +889,7 @@ def party_report(rakes, key, other):
 
 def shared_source_report(session, latest_at):
     """For each source station that loaded a rake for SAIL in the last SHARED_SOURCE_DAYS days, the rakes it
-    loaded for SAIL and for other consignees. Every list sent in that time counts, so rakes already
+    loaded for SAIL and for other consignees, in all and on each loading date (the date in LDNG TIME). Every list sent in that time counts, so rakes already
     delivered still count; a rake in several lists is counted once, by Rake ID and loading time."""
     end = latest_at.date()
     start = end - timedelta(days=SHARED_SOURCE_DAYS - 1)
@@ -910,13 +910,19 @@ def shared_source_report(session, latest_at):
         key = ((rake_id or "").strip() or (load_name or "").strip(), loaded, source)
         loadings[key] = cnsg
 
+    dates = [start + timedelta(days=n) for n in range(SHARED_SOURCE_DAYS)]
     sources = {}
-    for (_, _, source), cnsg in loadings.items():
-        line = sources.setdefault(source, {"sail": 0, "others": Counter()})
+    for (_, loaded, source), cnsg in loadings.items():
+        line = sources.setdefault(
+            source, {"sail": 0, "others": Counter(), "daily": {day: [0, 0] for day in dates}}
+        )
+        # daily: loading date -> [rakes for SAIL, rakes for others]
         if is_sail(cnsg):
             line["sail"] += 1
+            line["daily"][loaded.date()][0] += 1
         else:
             line["others"][party(cnsg)] += 1
+            line["daily"][loaded.date()][1] += 1
 
     report = []
     for source, line in sources.items():
@@ -930,10 +936,17 @@ def shared_source_report(session, latest_at):
             "total": line["sail"] + others,
             "sail_share": round(100 * line["sail"] / (line["sail"] + others)),
             "other_parties": sorted(line["others"].items(), key=lambda kv: (-kv[1], kv[0])),
+            "daily": [line["daily"][day] for day in dates],
         })
     report.sort(key=lambda row: (-row["total"], row["source"]))
     return {
         "rows": report,
+        "dates": dates,
+        # Per loading date, [SAIL, others] over all the sources in the table.
+        "daily": [
+            [sum(row["daily"][n][side] for row in report) for side in (0, 1)]
+            for n in range(len(dates))
+        ],
         "start": start,
         "end": end,
         "sail": sum(row["sail"] for row in report),
