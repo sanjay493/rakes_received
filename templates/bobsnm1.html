@@ -164,14 +164,15 @@
             <input type="date" name="to" value="{{ date_to.isoformat() if date_to else '' }}">
         </label>
         <button type="submit">Apply</button>
-        {% if date_from or date_to %}<a class="clear" href="{{ url_for('bobsnm1') }}">Show all</a>{% endif %}
+        {% if date_from or date_to %}<a class="clear" href="{{ url_for('bobsnm1', **{'from': '', 'to': ''}) }}">Show all</a>{% endif %}
+        {% if not default_period %}<a class="clear" href="{{ url_for('bobsnm1') }}">Last {{ default_days }} days</a>{% endif %}
         <label class="find">Find in this table
             <input type="search" data-find="receivedRows" placeholder="Station, plant, commodity...">
         </label>
     </form>
     {% if received %}
     <div class="summary">
-        <div><b>{{ received|length }}</b>rakes{% if date_from or date_to %} in the chosen dates{% endif %}</div>
+        <div><b>{{ received|length }}</b>rakes{% if default_period %} in the last {{ default_days }} days{% elif date_from or date_to %} in the chosen dates{% endif %}</div>
         {% if average_hours is not none %}<div><b>{{ average_hours }}</b>average transit hours</div>{% endif %}
     </div>
     <div class="breakdowns">

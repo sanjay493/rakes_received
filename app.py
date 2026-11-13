@@ -1075,6 +1075,7 @@ def enroute_rakes():
     )
 
 WAGON_PAGE_TYPE = "BOBSNM1"  # Wagon type listed on the /bobsnm1 page
+RECEIVED_DEFAULT_DAYS = 30  # Received rakes shown on that page when no dates are chosen
 
 def page_date(name):
     """A date from the query string ("2026-11-13"), or None when it is blank or unreadable."""
@@ -1088,6 +1089,11 @@ def bobsnm1():
     """Every BOBSNM1 rake: those in the Loaded In-Bound lists (each rake once, as it was last seen)
     and those in the received rakes, which follow the page's date filter."""
     date_from, date_to = page_date("from"), page_date("to")
+    # Opened without dates, the received rakes cover the last RECEIVED_DEFAULT_DAYS days, today included.
+    # Dates sent blank (the form with both cleared, or the "Show all" link) show every rake.
+    default_period = "from" not in request.args and "to" not in request.args
+    if default_period:
+        date_from = datetime.now(IST).date() - timedelta(days=RECEIVED_DEFAULT_DAYS - 1)
     session = SessionDB()
     try:
         latest_at = session.query(func.max(InboundRake.imported_at)).scalar()
@@ -1150,6 +1156,8 @@ def bobsnm1():
         received_by_source=counted(rake.source for rake in received),
         date_from=date_from,
         date_to=date_to,
+        default_period=default_period,
+        default_days=RECEIVED_DEFAULT_DAYS,
     )
 
 def inbound_data(destination):
