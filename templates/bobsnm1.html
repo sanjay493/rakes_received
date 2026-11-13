@@ -34,6 +34,12 @@
     .tools .find input { width: 100%; box-sizing: border-box; }
     .tools button, .tools a.clear { margin: 0; min-width: 0; }
     .note { margin: 10px 0 0; font-size: 13px; color: #52606d; }
+    .note.warn { color: #8a5300; background: #fff4d6; border-radius: 4px; padding: 6px 10px; margin-bottom: 10px; }
+    .cmp th.grp, .cmp td.grp { border-left: 2px solid #9fb3c8; }
+    .cmp thead th { text-align: left; }
+    .cmp thead tr:nth-child(2) th { top: 29px; }
+    .cmp td.big { font-size: 16px; font-weight: bold; color: #1f3a5f; }
+    .cmp tr.total td { background: #e8eef5; font-weight: bold; }
     /* Phones: one card per rake instead of the table. */
     .phone-only { display: none; }
     @media (max-width: 700px) {
@@ -60,6 +66,62 @@
         <div><b>{{ received|length }}</b>received{% if received|length != received_total %} (of {{ received_total }}){% endif %}</div>
     </div>
 </div>
+
+{% if comparison %}
+<div class="card">
+    <h3 style="margin-top: 0;">Date-wise Loading in {{ comparison.wagon_prefix }} Rakes: {{ comparison.consignees|join(' and ') }} (Last {{ comparison.days }} Days)</h3>
+    <p class="note" style="margin-top: 0;">
+        Rakes of {{ comparison.wagon_prefix }} wagons ({{ comparison.wagon_prefix }}M1, {{ comparison.wagon_prefix }}S) loaded for each consignee,
+        by loading date (LDNG TIME), {{ comparison.start.strftime('%d-%m-%Y') }} to {{ comparison.end.strftime('%d-%m-%Y') }}.
+        Counted from every Loaded In-Bound list received in that time, each rake once.
+    </p>
+    {% if comparison.history_from %}
+    <p class="note warn">
+        The saved lists start on {{ comparison.history_from.strftime('%d-%m-%Y') }}, so rakes loaded earlier that had already
+        reached their destination by then are missing: the earlier dates are undercounted.
+    </p>
+    {% endif %}
+    <div class="scroll-box">
+        <table class="cmp">
+            <thead>
+                <tr>
+                    <th rowspan="2">Loading Date</th>
+                    {% for name in comparison.consignees %}<th colspan="3" class="grp">{{ name }}</th>{% endfor %}
+                </tr>
+                <tr>
+                    {% for name in comparison.consignees %}
+                    <th class="num grp">Rakes</th><th>Wagon type</th><th>Loading stations</th>
+                    {% endfor %}
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in comparison.rows %}
+                <tr>
+                    <td class="nowrap">{{ row.date.strftime('%d-%m-%Y') }}</td>
+                    {% for cell in row.cells %}
+                    <td class="num grp big">{{ cell.total or '—' }}</td>
+                    <td>{% for type, count in cell.types %}<span class="chip">{{ type }} <b>{{ count }}</b></span> {% endfor %}</td>
+                    <td>{% for code, label, count in cell.sources %}<span class="chip" title="{{ label }}">{{ code }} <b>{{ count }}</b></span> {% endfor %}</td>
+                    {% endfor %}
+                </tr>
+                {% endfor %}
+                <tr class="total">
+                    <td>Total</td>
+                    {% for cell in comparison.totals %}
+                    <td class="num grp big">{{ cell.total }}</td>
+                    <td>{% for type, count in cell.types %}<span class="chip">{{ type }} <b>{{ count }}</b></span> {% endfor %}</td>
+                    <td>{% for code, label, count in cell.sources %}<span class="chip" title="{{ label }}">{{ code }} <b>{{ count }}</b></span> {% endfor %}</td>
+                    {% endfor %}
+                </tr>
+            </tbody>
+        </table>
+    </div>
+    <p class="note">
+        Latest date first. Consignee is the CNSG code (SAIL, TISC). TISCO rakes are only in the all-India lists,
+        so a day with only plant lists shows none for TISCO. Hover over a station code for its name.
+    </p>
+</div>
+{% endif %}
 
 <div class="card">
     <h3 style="margin-top: 0;">Loaded In-Bound: {{ wagon_type }} Rakes ({{ inbound_rakes|length }})</h3>

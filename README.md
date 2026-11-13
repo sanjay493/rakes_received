@@ -124,7 +124,15 @@ To use it:
 2. Click the extension icon. It shows how many rows it found.
 3. Enter the API token (it's remembered after the first send) and click **Send to dashboard**.
 
-The extension runs only when its icon is clicked, reads only tables on the open page, and never sees FOIS passwords.
+The extension reads only tables on the open page and never sees FOIS passwords. It runs when its icon is clicked, unless automatic sending is turned on.
+
+To send the Loaded In-Bound list automatically every 5 hours:
+
+1. Open the all-India Loaded In-Bound report on FOIS with **Show All**, click the extension icon and send it once by hand.
+2. Tick **Send the Loaded In-Bound list automatically every 5 hours**. Chrome asks once for access to the FOIS site; allow it.
+3. Click **Refresh the report and send now** to test it. The popup shows the result, and when the next send is due.
+
+Every 5 hours the extension then reloads the report in that tab, waits for it to finish loading and sends it. It can't log in to FOIS: if the report doesn't come back after the reload (FOIS logged out, or the tab was closed), nothing is sent, the icon shows a red **!** and the popup says why. Chrome, the FOIS tab and the dashboard must be left running, and the computer must stay awake. After Chrome restarts, the extension looks for the report in any open tab of the same site. Untick the box to stop. To change the interval, edit `PERIOD_MINUTES` in `background.js`.
 
 It recognises two reports by their headings:
 
@@ -147,4 +155,6 @@ The km left is the goods distance from `CRNT LOCN` to `STTN TO` on the Railways'
 
 The same tab first looks up station names on [FOIS Station Help](https://fois.indianrail.gov.in/FOISWebPortal/pages/FWP_SttnHelp.jsp), for each `STTN FROM` and `STTN TO` of those rakes that has no name in the station mappings yet. Found names are added to the station mappings, where they can be edited on the config page; a name already there is never replaced. Every code looked up is recorded in the `station_lookups` table, with an empty name when FOIS doesn't know it, so it's only asked once. FOIS names can be cut short at about 30 characters, and sidings show the firm's name (for example `BSPC` is "M/S. STEEL AUTHORITY OF INDIA"), so edit any that read badly. A lookup that fails, such as when FOIS says its server isn't running, is tried again on the next send.
 
-If the site moves to another address, update `REPORTS` in `popup.js`, the URLs in `lookup.js` and `host_permissions` in `manifest.json`.
+The **BOBSNM1** page (`/bobsnm1`) lists every `BOBSNM1` rake. Its Loaded In-Bound table takes the rakes from every saved list, each once (by Rake ID, `LDNG TIME` and source) as it was in the last list that had it, and marks those still in the latest list. Its Received Rakes table shows the last 30 days unless dates are chosen; **Show all** lists every one. A first table compares loading in `BOBSN` wagons (`BOBSNM1`, `BOBSNS`) for consignees `SAIL` and `TISC` (TISCO) on each of the last 7 loading dates, with the wagon types and loading stations; it's counted like the All-India page's 7-day tables. To compare other consignees or wagons, edit `COMPARE_CONSIGNEES` and `COMPARE_WAGON_PREFIX` in `app.py`.
+
+If the site moves to another address, update `REPORTS` in `popup.js`, `INBOUND_URL` in `background.js`, the URLs in `lookup.js` and `host_permissions` in `manifest.json`.

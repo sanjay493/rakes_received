@@ -1084,6 +1084,76 @@ def page_date(name):
     except ValueError:
         return None
 
+# Date-wise loading comparison on the /bobsnm1 page: (CNSG code, name shown) of the consignees compared,
+# over wagon types starting with COMPARE_WAGON_PREFIX (BOBSNM1, BOBSNS, ...).
+COMPARE_CONSIGNEES = [("SAIL", "SAIL"), ("TISC", "TISCO")]
+COMPARE_WAGON_PREFIX = "BOBSN"
+
+def bobsn_loading_comparison(session, latest_at):
+    """Rakes of BOBSN wagons loaded for each consignee in COMPARE_CONSIGNEES on each of the last
+    SHARED_SOURCE_DAYS loading dates (the date in LDNG TIME), with their wagon types and loading stations.
+    Every list sent in that time counts, so delivered rakes still count; a rake in several lists is
+    counted once, by Rake ID, loading time and source."""
+    end = latest_at.date()
+    start = end - timedelta(days=SHARED_SOURCE_DAYS - 1)
+    window = InboundRake.imported_at >= datetime.combine(start, datetime.min.time())
+    codes = [code for code, _ in COMPARE_CONSIGNEES]
+    rows = (
+        session.query(InboundRake.rake_id, InboundRake.load_name, InboundRake.sttn_from,
+                      InboundRake.cnsg, InboundRake.load_type, InboundRake.ldng_time)
+        .filter(
+            window,
+            func.upper(func.trim(func.coalesce(InboundRake.load_type, ""))).like(COMPARE_WAGON_PREFIX + "%"),
+            func.upper(func.trim(func.coalesce(InboundRake.cnsg, ""))).in_(codes),
+        )
+        .all()
+    )
+    first_list = session.query(func.min(InboundRake.imported_at)).filter(window).scalar()
+
+    loadings = {}
+    for rake_id, load_name, sttn_from, cnsg, load_type, ldng_time in rows:
+        loaded = loading_datetime(ldng_time)
+        source = station_code(sttn_from)
+        if not loaded or not source or not start <= loaded.date() <= end:
+            continue
+        key = ((rake_id or "").strip() or (load_name or "").strip(), loaded, source)
+        loadings[key] = (party(cnsg), (load_type or "").strip().upper())
+
+    def cell():
+        return {"total": 0, "types": Counter(), "sources": Counter()}
+
+    def add(target, wagon_type, source):
+        target["total"] += 1
+        target["types"][wagon_type] += 1
+        target["sources"][source] += 1
+
+    def shown(target):
+        return {
+            "total": target["total"],
+            "types": counted(target["types"].elements()),
+            # (code, "NAME (CODE)", rakes): the code is shown, the name is its tooltip.
+            "sources": [(code, station_label(code), count) for code, count in counted(target["sources"].elements())],
+        }
+
+    dates = [start + timedelta(days=n) for n in range(SHARED_SOURCE_DAYS)]
+    daily = {day: {code: cell() for code in codes} for day in dates}
+    totals = {code: cell() for code in codes}
+    for (_, loaded, source), (code, wagon_type) in loadings.items():
+        add(daily[loaded.date()][code], wagon_type, source)
+        add(totals[code], wagon_type, source)
+
+    return {
+        "consignees": [name for _, name in COMPARE_CONSIGNEES],
+        "rows": [{"date": day, "cells": [shown(daily[day][code]) for code in codes]} for day in reversed(dates)],
+        "totals": [shown(totals[code]) for code in codes],
+        "start": start,
+        "end": end,
+        "days": SHARED_SOURCE_DAYS,
+        "wagon_prefix": COMPARE_WAGON_PREFIX,
+        # History is complete only once lists go back to the start of the window.
+        "history_from": first_list.date() if first_list and first_list.date() > start else None,
+    }
+
 @app.route("/bobsnm1")
 def bobsnm1():
     """Every BOBSNM1 rake: those in the Loaded In-Bound lists (each rake once, as it was last seen)
@@ -1112,6 +1182,7 @@ def bobsnm1():
         if date_to:
             query = query.filter(Rake.received_time < datetime.combine(date_to + timedelta(days=1), datetime.min.time()))
         received = query.order_by(Rake.received_time.desc(), Rake.id.desc()).all()
+        comparison = bobsn_loading_comparison(session, latest_at) if latest_at else None
     finally:
         session.close()
 
@@ -1142,6 +1213,7 @@ def bobsnm1():
         "bobsnm1.html",
         wagon_type=WAGON_PAGE_TYPE,
         latest_at=latest_at,
+        comparison=comparison,
         inbound_rakes=inbound_rakes,
         en_route_count=sum(rake.en_route for rake in inbound_rakes),
         stabled_count=sum(rake.stabled and rake.en_route for rake in inbound_rakes),
