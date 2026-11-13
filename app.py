@@ -13,6 +13,7 @@ from sqlalchemy.dialects.sqlite import insert
 from sqlalchemy.exc import IntegrityError
 
 from inbound_exports import build_excel, build_pdf
+import commodity_exports
 
 # ------------------ APP SETUP ------------------
 
@@ -407,19 +408,22 @@ def route_date_report(rakes):
 def add_counts(lines):
     """Add up counts_line() results, plant by plant."""
     return counts_line({
-        "rakes": {plant: sum(line["plants"][plant] for line in lines) for plant in INBOUND_COLUMNS},
-        "stabled": {plant: sum(line["stabled"][plant] for line in lines) for plant in INBOUND_COLUMNS},
+        "rakes": {plant: sum(line["plants"][plant] for line in lines) for plant in PLANTS},
+        "stabled": {plant: sum(line["stabled"][plant] for line in lines) for plant in PLANTS},
     })
 
 def empty_counts():
-    return {"rakes": dict.fromkeys(INBOUND_COLUMNS, 0), "stabled": dict.fromkeys(INBOUND_COLUMNS, 0)}
+    return {"rakes": dict.fromkeys(PLANTS, 0), "stabled": dict.fromkeys(PLANTS, 0)}
 
 def commodity_plant_report(rakes):
-    """Count rakes and stabled rakes by commodity, distance slab, source station and plant or agent,
-    largest commodity first. Within a slab, the source with the most rakes comes first."""
+    """Count rakes and stabled rakes by commodity, distance slab, source station and plant, largest
+    commodity first. Within a slab, the source with the most rakes comes first. Rakes to the pellet
+    agents are left out of this table; the page's other lists still show them."""
     counts = {}
     for rake in rakes:
         plant = INBOUND_DESTINATIONS[rake.sttn_to.strip().upper()]
+        if plant not in PLANTS:
+            continue
         slabs = counts.setdefault(commodity_name(rake.cmdt), {})
         sources = slabs.setdefault(slab_start(rake.distance_km), {})
         source = sources.setdefault((rake.sttn_from or "").strip().upper(), empty_counts())
@@ -889,32 +893,36 @@ def party_report(rakes, key, other):
 
 def shared_source_report(session, latest_at):
     """For each source station that loaded a rake for SAIL in the last SHARED_SOURCE_DAYS days, the rakes it
-    loaded for SAIL and for other consignees, in all and on each loading date (the date in LDNG TIME). Every list sent in that time counts, so rakes already
+    loaded for SAIL and for other consignees, in all and on each loading date (the date in LDNG TIME).
+    There is a row per commodity and source, covering every commodity such a source loaded. Every list sent in that time counts, so rakes already
     delivered still count; a rake in several lists is counted once, by Rake ID and loading time."""
     end = latest_at.date()
     start = end - timedelta(days=SHARED_SOURCE_DAYS - 1)
     rows = (
         session.query(InboundRake.rake_id, InboundRake.load_name, InboundRake.sttn_from,
-                      InboundRake.cnsg, InboundRake.ldng_time, InboundRake.imported_at)
+                      InboundRake.cnsg, InboundRake.cmdt, InboundRake.ldng_time, InboundRake.imported_at)
         .filter(InboundRake.imported_at >= datetime.combine(start, datetime.min.time()))
         .all()
     )
     loadings = {}
     first_list = None
-    for rake_id, load_name, sttn_from, cnsg, ldng_time, imported_at in rows:
+    for rake_id, load_name, sttn_from, cnsg, cmdt, ldng_time, imported_at in rows:
         first_list = min(first_list or imported_at, imported_at)
         loaded = loading_datetime(ldng_time)
         source = station_code(sttn_from)
         if not loaded or not source or not start <= loaded.date() <= end:
             continue
         key = ((rake_id or "").strip() or (load_name or "").strip(), loaded, source)
-        loadings[key] = cnsg
+        loadings[key] = (cnsg, commodity_name(cmdt))
 
     dates = [start + timedelta(days=n) for n in range(SHARED_SOURCE_DAYS)]
-    sources = {}
-    for (_, loaded, source), cnsg in loadings.items():
-        line = sources.setdefault(
-            source, {"sail": 0, "others": Counter(), "daily": {day: [0, 0] for day in dates}}
+    sail_sources = {source for (_, _, source), (cnsg, _) in loadings.items() if is_sail(cnsg)}
+    lines = {}
+    for (_, loaded, source), (cnsg, commodity) in loadings.items():
+        if source not in sail_sources:
+            continue  # Only sources that load for SAIL
+        line = lines.setdefault(
+            (commodity, source), {"sail": 0, "others": Counter(), "daily": {day: [0, 0] for day in dates}}
         )
         # daily: loading date -> [rakes for SAIL, rakes for others]
         if is_sail(cnsg):
@@ -925,11 +933,10 @@ def shared_source_report(session, latest_at):
             line["daily"][loaded.date()][1] += 1
 
     report = []
-    for source, line in sources.items():
-        if not line["sail"]:
-            continue  # Only sources that load for SAIL
+    for (commodity, source), line in lines.items():
         others = sum(line["others"].values())
         report.append({
+            "commodity": commodity,
             "source": station_label(source),
             "sail": line["sail"],
             "others": others,
@@ -938,9 +945,29 @@ def shared_source_report(session, latest_at):
             "other_parties": sorted(line["others"].items(), key=lambda kv: (-kv[1], kv[0])),
             "daily": [line["daily"][day] for day in dates],
         })
-    report.sort(key=lambda row: (-row["total"], row["source"]))
+    # Commodities with the most rakes first; within one, sources with the most rakes first.
+    commodity_totals = Counter()
+    for row in report:
+        commodity_totals[row["commodity"]] += row["total"]
+    report.sort(key=lambda row: (-commodity_totals[row["commodity"]], row["commodity"], -row["total"], row["source"]))
+    groups = []
+    for row in report:
+        if not groups or groups[-1]["commodity"] != row["commodity"]:
+            groups.append({"commodity": row["commodity"], "rows": []})
+        groups[-1]["rows"].append(row)
+    for group in groups:
+        # Sub totals for the date-wise table.
+        group["sail"] = sum(row["sail"] for row in group["rows"])
+        group["others"] = sum(row["others"] for row in group["rows"])
+        group["total"] = group["sail"] + group["others"]
+        group["daily"] = [
+            [sum(row["daily"][n][side] for row in group["rows"]) for side in (0, 1)]
+            for n in range(len(dates))
+        ]
     return {
         "rows": report,
+        "groups": groups,
+        "source_count": len(sail_sources),
         "dates": dates,
         # Per loading date, [SAIL, others] over all the sources in the table.
         "daily": [
@@ -1074,7 +1101,7 @@ def inbound_data(destination):
         "rakes": rakes,
         "report": commodity_plant_report(rakes),
         "routes": route_date_report(rakes),
-        "plants": INBOUND_COLUMNS,
+        "plants": PLANTS,  # Columns of the Rakes in Transit table
         "distance_pairs": len(distances),
         "distance_pairs_with_km": sum(km is not None for km in distances.values()),
         "rakes_with_distance": sum(rake.distance_km is not None for rake in rakes),
@@ -1570,16 +1597,13 @@ def dashboard():
         total_records=len(df) if not df.empty else 0
     )
 
-@app.route("/commodity_analysis")
-def commodity_analysis():
-    """Commodity-wise analysis dashboard showing all plants grouped by source station"""
+def commodity_analysis_data(selected_commodity="", selected_destination=""):
+    """Everything the Commodity Analysis page and its downloads show: transit time by commodity,
+    destination plant and source station, for the chosen commodity and destination (blank for all)."""
     from datetime import datetime, timedelta
     
     session_db = SessionDB()
     
-    # Get filter parameters
-    selected_commodity = request.args.get("commodity", "")
-    selected_destination = request.args.get("destination", "")
     
     # Get all unique values for filters
     commodities = [r[0] for r in session_db.query(Rake.commodity).distinct().all() if r[0]]
@@ -1603,6 +1627,7 @@ def commodity_analysis():
     
     # Calculate header labels for the table based on filtered data
     header_months = []
+    header_month_starts = []  # First day of each month column; None for a padded one
     header_weeks = []
     header_days = []
     
@@ -1634,10 +1659,12 @@ def commodity_analysis():
             month_headers = month_headers.tail(4)
             for _, row in month_headers.iterrows():
                 header_months.append(row['received_time'].strftime("%b'%y"))
+                header_month_starts.append(row['received_time'])
         
         # Pad if less than 4
         while len(header_months) < 4:
             header_months.insert(0, "—")
+            header_month_starts.insert(0, None)
         
         # Generate header labels for weeks (simple 7-day intervals from yesterday)
         # Create 4 weeks: (yesterday-27 to yesterday-21), (yesterday-20 to yesterday-14), 
@@ -1662,82 +1689,52 @@ def commodity_analysis():
             day = yesterday - timedelta(days=i)
             header_days.append(day.strftime('%d-%b'))
         
+        def period_slot(period_df):
+            """Average transit hours and rake count of one period; avg is None when it has no rakes."""
+            avg = period_df['transit_time_hrs'].mean() if len(period_df) else None
+            return {
+                'avg': round(float(avg), 2) if avg is not None and pd.notna(avg) else None,
+                'count': int(len(period_df)),
+            }
+
         # Group by commodity, destination, and source
         grouped = df.groupby(['commodity', 'sttn_to', 'sttn_from'])
         
         for (commodity, destination, source), group_df in grouped:
-            # Use the same date ranges as calculated for headers
-            # Last 4 months - month by month breakdown
+            # One slot per column of the table, in the header's order, so a period without rakes
+            # keeps its empty place instead of shifting the later ones left.
             df_4m = group_df[group_df['received_time'] >= last_4_months]
             months_data = []
-            if len(df_4m) > 0:
-                monthly_breakdown = (
-                    df_4m.set_index('received_time')
-                    .resample('MS')
-                    .agg({'transit_time_hrs': 'mean', 'sttn_from': 'count'})
-                    .reset_index()
-                )
-                # Get last 4 months
-                monthly_breakdown = monthly_breakdown.tail(4)
-                for _, row in monthly_breakdown.iterrows():
-                    if row['sttn_from'] > 0:  # Only add if data exists
-                        months_data.append({
-                            'label': row['received_time'].strftime('%b %y'),
-                            'avg': round(row['transit_time_hrs'], 2) if pd.notna(row['transit_time_hrs']) else None,
-                            'count': int(row['sttn_from'])
-                        })
-            
-            # Last 4 weeks - week by week breakdown using simple 7-day intervals
+            for month_start in header_month_starts:
+                if month_start is None:
+                    months_data.append({'avg': None, 'count': 0})
+                else:
+                    months_data.append(period_slot(df_4m[
+                        (df_4m['received_time'] >= month_start) &
+                        (df_4m['received_time'] < month_start + pd.offsets.MonthBegin(1))
+                    ]))
+
+            # Weeks are 7-day spans ending yesterday, 7, 14 and 21 days before.
             df_8w = group_df[group_df['received_time'] >= last_8_weeks]
             weeks_data = []
-            if len(df_8w) > 0:
-                # Create 4 weeks manually: week 1, week 2, week 3, week 4
-                for i in range(3, -1, -1):  # 3, 2, 1, 0
-                    week_end = yesterday - timedelta(days=i*7)
-                    week_start = week_end - timedelta(days=6)
-                    
-                    # Filter data for this specific week
-                    week_df = group_df[
-                        (group_df['received_time'] >= week_start) & 
-                        (group_df['received_time'] <= week_end + timedelta(hours=23, minutes=59, seconds=59))
-                    ]
-                    
-                    if len(week_df) > 0:
-                        avg_transit = week_df['transit_time_hrs'].mean()
-                        count = len(week_df)
-                        
-                        weeks_data.append({
-                            'label': week_start.strftime('%d-%m'),
-                            'avg': round(avg_transit, 2) if pd.notna(avg_transit) else None,
-                            'count': int(count)
-                        })
-            
-            # Last 4 days - day by day breakdown using simple day intervals
+            for i in range(3, -1, -1):
+                week_end = yesterday - timedelta(days=i*7)
+                week_start = week_end - timedelta(days=6)
+                weeks_data.append(period_slot(group_df[
+                    (group_df['received_time'] >= week_start) &
+                    (group_df['received_time'] <= week_end + timedelta(hours=23, minutes=59, seconds=59))
+                ]))
+
+            # Days are yesterday and the 3 days before.
             df_4d = group_df[group_df['received_time'] >= last_4_days]
             days_data = []
-            if len(df_4d) > 0:
-                # Create 4 days manually: yesterday-3, yesterday-2, yesterday-1, yesterday
-                for i in range(3, -1, -1):  # 3, 2, 1, 0
-                    day = yesterday - timedelta(days=i)
-                    day_start = day
-                    day_end = day + timedelta(hours=23, minutes=59, seconds=59)
-                    
-                    # Filter data for this specific day
-                    day_df = group_df[
-                        (group_df['received_time'] >= day_start) & 
-                        (group_df['received_time'] <= day_end)
-                    ]
-                    
-                    if len(day_df) > 0:
-                        avg_transit = day_df['transit_time_hrs'].mean()
-                        count = len(day_df)
-                        
-                        days_data.append({
-                            'label': day.strftime('%d-%b'),
-                            'avg': round(avg_transit, 2) if pd.notna(avg_transit) else None,
-                            'count': int(count)
-                        })
-            
+            for i in range(3, -1, -1):
+                day = yesterday - timedelta(days=i)
+                days_data.append(period_slot(group_df[
+                    (group_df['received_time'] >= day) &
+                    (group_df['received_time'] <= day + timedelta(hours=23, minutes=59, seconds=59))
+                ]))
+
             # Calculate overall averages for compatibility
             avg_4m = df_4m['transit_time_hrs'].mean() if len(df_4m) > 0 else None
             count_4m = len(df_4m)
@@ -1851,17 +1848,78 @@ def commodity_analysis():
     # Within each commodity, plants in the usual BSP, DSP, RSP, BSL, ISP order.
     grouped_data = dict(sorted(grouped_data.items(), key=lambda kv: (kv[0][0], plant_sort_key(kv[0][1]))))
     
+    return {
+        "grouped_data": grouped_data,
+        "commodities": sorted(commodities),
+        "destinations": sorted(destinations, key=plant_sort_key),
+        "selected_commodity": selected_commodity,
+        "selected_destination": selected_destination,
+        "header_months": header_months,
+        "header_weeks": header_weeks,
+        "header_days": header_days,
+    }
+
+PICK_SEPARATOR = "||"  # Between the commodity and the source in a ticked box's value
+
+def commodity_sources(grouped_data):
+    """[(commodity, [source, ...])] for the report's tick list, both in name order."""
+    sources = {}
+    for (commodity, _), items in grouped_data.items():
+        sources.setdefault(commodity, set()).update(item["source"] for item in items)
+    return [(commodity, sorted(names)) for commodity, names in sorted(sources.items())]
+
+@app.route("/commodity_analysis")
+def commodity_analysis():
+    """Commodity-wise analysis dashboard showing all plants grouped by source station"""
+    data = commodity_analysis_data(request.args.get("commodity", ""), request.args.get("destination", ""))
     return render_template(
         "commodity_analysis.html",
-        grouped_data=grouped_data,
-        commodities=sorted(commodities),
-        destinations=sorted(destinations, key=plant_sort_key),
-        selected_commodity=selected_commodity,
-        selected_destination=selected_destination,
-        header_months=header_months,
-        header_weeks=header_weeks,
-        header_days=header_days
+        report_choices=commodity_sources(data["grouped_data"]),
+        pick_separator=PICK_SEPARATOR,
+        **data,
     )
+
+def commodity_download(build, extension, mimetype):
+    """Send the Commodity Analysis report as a file. It follows the page's commodity and destination
+    filters, and keeps only the ticked commodity-source pairs ("pick" values) when any are sent."""
+    data = commodity_analysis_data(request.values.get("commodity", ""), request.values.get("destination", ""))
+    picks = {
+        tuple(value.split(PICK_SEPARATOR, 1))
+        for value in request.values.getlist("pick") if PICK_SEPARATOR in value
+    }
+    available = sum(len(items) for items in data["grouped_data"].values())
+    if picks:
+        kept = {
+            key: [item for item in items if (item["commodity"], item["source"]) in picks]
+            for key, items in data["grouped_data"].items()
+        }
+        data["grouped_data"] = {key: items for key, items in kept.items() if items}
+    shown = sum(len(items) for items in data["grouped_data"].values())
+    if not shown:
+        return "Nothing to download: no rakes match the chosen commodities and sources.", 404
+
+    data["customised"] = shown < available
+    data["generated_at"] = datetime.now(IST).replace(tzinfo=None)
+    parts = [
+        "commodity_analysis", data["selected_destination"],
+        "custom" if data["customised"] else "", data["generated_at"].strftime("%Y%m%d_%H%M"),
+    ]
+    return send_file(
+        io.BytesIO(build(data)),
+        mimetype=mimetype,
+        as_attachment=True,
+        download_name="_".join(filter(None, parts)) + extension,
+    )
+
+@app.route("/commodity_analysis/report.xlsx", methods=["GET", "POST"])
+def commodity_analysis_excel():
+    return commodity_download(
+        commodity_exports.build_excel, ".xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+
+@app.route("/commodity_analysis/report.pdf", methods=["GET", "POST"])
+def commodity_analysis_pdf():
+    return commodity_download(commodity_exports.build_pdf, ".pdf", "application/pdf")
 
 @app.route("/source_outliers/<source_station>")
 def source_outliers(source_station):

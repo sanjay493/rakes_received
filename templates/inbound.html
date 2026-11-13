@@ -201,7 +201,7 @@
     </div>
     </div>
 
-    {# Phones: the same counts as a list, since 15 columns can't fit. Only plants with rakes are shown. #}
+    {# Phones: the same counts as a list, since the table is too wide. Only plants with rakes are shown. #}
     <div class="transit-mobile">
         {% for row in report.rows %}
         <section class="tm-commodity">
@@ -228,10 +228,11 @@
         </div>
     </div>
     {% else %}
-    <p>No rakes in this list are going to the plants or pellet agents.</p>
+    <p>No rakes in this list are going to the plants.</p>
     {% endif %}
     <p style="margin: 12px 0 0; font-size: 13px; color: #52606d;">
         Each cell shows all rakes, with the stabled ones (status ST) in brackets. For example, "5 (2 ST)" is 5 rakes, 2 of them stabled.
+        This table counts rakes to the plants only; rakes to the pellet agents are in the lists below.
         Km left is the goods distance from the current location to the destination on the Railways' Rates Branch System.
         It's available for {{ rakes_with_distance }} of {{ rakes|length }} rakes in the list; "Unknown" means it hasn't been looked up yet or the site doesn't know that location.    </p>
 </div>

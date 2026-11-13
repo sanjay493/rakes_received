@@ -33,6 +33,130 @@
     </form>
 </div>
 
+<!-- Download: the report follows the filters above; the tick list narrows it to chosen commodities and sources. -->
+{% if grouped_data %}
+<div class="card">
+    <h3 style="margin-bottom: 4px;">Download Report</h3>
+    <p style="margin: 0 0 12px; color: #52606d; font-size: 13px;">
+        Downloads this analysis as Excel or PDF, for the commodity and destination chosen in the filters above.
+        To customise it, open the list below and untick the commodities or sources you don't want.
+    </p>
+    <form method="POST" id="reportForm">
+        <input type="hidden" name="commodity" value="{{ selected_commodity }}">
+        <input type="hidden" name="destination" value="{{ selected_destination }}">
+        <details class="pick-box">
+            <summary>Choose commodities and sources <span id="pickSummary" class="pick-summary"></span></summary>
+            <div class="pick-actions">
+                <button type="button" class="pick-small" id="pickAll">Select all</button>
+                <button type="button" class="pick-small" id="pickNone">Clear all</button>
+                <input type="search" id="pickSearch" class="pick-search" placeholder="Search commodity or source" aria-label="Search commodity or source">
+            </div>
+            <div class="pick-list">
+                {% for commodity, sources in report_choices %}
+                <details class="pick-group">
+                    <summary>
+                        <label class="pick-label"><input type="checkbox" class="pick-commodity" checked> {{ commodity }}</label>
+                        <span class="pick-count"></span>
+                    </summary>
+                    <div class="pick-sources">
+                        {% for source in sources %}
+                        <label class="pick-label"><input type="checkbox" name="pick" value="{{ commodity }}{{ pick_separator }}{{ source }}" checked> {{ source }}</label>
+                        {% endfor %}
+                    </div>
+                </details>
+                {% endfor %}
+            </div>
+        </details>
+        <div style="display: flex; gap: 10px; flex-wrap: wrap; margin-top: 12px; align-items: center;">
+            <button type="submit" class="btn-primary" formaction="{{ url_for('commodity_analysis_excel') }}">Download Excel</button>
+            <button type="submit" class="btn-primary" formaction="{{ url_for('commodity_analysis_pdf') }}">Download PDF</button>
+            <span id="pickWarning" style="color: #b42318; font-size: 13px;" hidden>Tick at least one source to download.</span>
+        </div>
+    </form>
+</div>
+
+<style>
+    .pick-box { border: 1px solid #e4e7eb; border-radius: 6px; padding: 8px 12px; }
+    .pick-box > summary { cursor: pointer; font-weight: bold; color: #1f3a5f; }
+    .pick-summary, .pick-count { font-weight: normal; color: #52606d; font-size: 13px; margin-left: 6px; }
+    .pick-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 10px 0; }
+    .pick-small { min-width: 0; padding: 6px 12px; margin: 0; font-size: 13px; }
+    .pick-search { width: auto; flex: 1 1 220px; max-width: 320px; margin: 0; padding: 6px 10px; }
+    .pick-list { max-height: 50vh; overflow: auto; border-top: 1px solid #e4e7eb; }
+    .pick-group { border-bottom: 1px solid #e4e7eb; padding: 6px 0; }
+    .pick-group > summary { cursor: pointer; }
+    .pick-label { display: inline-flex; align-items: center; gap: 6px; font-weight: normal; margin: 0; cursor: pointer; }
+    .pick-group > summary .pick-label { font-weight: bold; color: #1f3a5f; }
+    .pick-label input { width: auto; margin: 0; padding: 0; }
+    .pick-sources { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 4px 16px; padding: 8px 0 4px 22px; font-size: 13px; }
+    .pick-label[hidden], .pick-group[hidden] { display: none; }
+</style>
+
+<script>
+    // Tick list for the customised report. A commodity's box ticks or unticks all its sources, and
+    // shows a dash when only some are ticked. Hidden (searched-out) sources keep their ticks.
+    (function () {
+        const form = document.getElementById("reportForm");
+        const groups = [...form.querySelectorAll(".pick-group")];
+        const summary = document.getElementById("pickSummary");
+        const warning = document.getElementById("pickWarning");
+        const buttons = [...form.querySelectorAll("button[type=submit]")];
+        const sourcesOf = (group) => [...group.querySelectorAll("input[name=pick]")];
+
+        function refresh() {
+            let ticked = 0, total = 0, commodities = 0;
+            groups.forEach((group) => {
+                const sources = sourcesOf(group);
+                const on = sources.filter((box) => box.checked).length;
+                const head = group.querySelector(".pick-commodity");
+                head.checked = on === sources.length;
+                head.indeterminate = on > 0 && on < sources.length;
+                group.querySelector(".pick-count").textContent = `${on} of ${sources.length} sources`;
+                ticked += on;
+                total += sources.length;
+                commodities += on > 0;
+            });
+            summary.textContent = ticked === total
+                ? "(all included)"
+                : `(${commodities} of ${groups.length} commodities, ${ticked} of ${total} sources)`;
+            buttons.forEach((button) => { button.disabled = ticked === 0; });
+            warning.hidden = ticked > 0;
+        }
+
+        groups.forEach((group) => {
+            group.querySelector(".pick-commodity").addEventListener("change", (event) => {
+                sourcesOf(group).forEach((box) => { box.checked = event.target.checked; });
+                refresh();
+            });
+            sourcesOf(group).forEach((box) => box.addEventListener("change", refresh));
+        });
+        const setAll = (value) => {
+            groups.forEach((group) => sourcesOf(group).forEach((box) => { box.checked = value; }));
+            refresh();
+        };
+        document.getElementById("pickAll").addEventListener("click", () => setAll(true));
+        document.getElementById("pickNone").addEventListener("click", () => setAll(false));
+
+        document.getElementById("pickSearch").addEventListener("input", (event) => {
+            const words = event.target.value.trim().toUpperCase().split(/\s+/).filter(Boolean);
+            const matches = (text) => words.every((word) => text.toUpperCase().includes(word));
+            groups.forEach((group) => {
+                const name = group.querySelector("summary .pick-label").textContent;
+                const whole = !words.length || matches(name);
+                let shown = 0;
+                [...group.querySelectorAll(".pick-sources .pick-label")].forEach((label) => {
+                    label.hidden = !(whole || matches(label.textContent));
+                    shown += !label.hidden;
+                });
+                group.hidden = shown === 0;
+                group.open = words.length > 0 && shown > 0 && !matches(name);
+            });
+        });
+        refresh();
+    })();
+</script>
+{% endif %}
+
 <!-- Analysis Tables -->
 {% if grouped_data %}
     {% for (commodity, destination), sources in grouped_data.items() %}

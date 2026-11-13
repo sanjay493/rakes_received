@@ -20,10 +20,10 @@ STABLED_FILL = "FEF3F2"
 STABLED_TEXT = "B42318"
 
 NOTES = [
-    'Each plant and pellet agent shows all rakes, and how many of them are stabled (status ST). Stabled rakes are included in the rake count.',
+    'Each plant shows all rakes, and how many of them are stabled (status ST). Stabled rakes are included in the rake count. Rakes to the pellet agents are not in this table.',
     "Km left is the goods distance from the current location to the destination on the Railways' Rates Branch System.",
     '"Unknown" means the distance has not been looked up yet or the site does not know that location.',
-    "Source station is the STTN FROM of the rakes; each distance slab lists every source with rakes to any plant or pellet agent.",
+    "Source station is the STTN FROM of the rakes; each distance slab lists every source with rakes to any plant.",
 ]
 
 DETAIL_TITLE = "Rake Details"

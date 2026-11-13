@@ -85,11 +85,17 @@
     /* Date-wise table: the two header rows stay on top together, and the source column stays on the left. */
     .date-table thead { position: sticky; top: 0; z-index: 3; }
     .scroll-box .date-table thead th { position: static; text-align: center; white-space: nowrap; border-left: 1px solid #3d5a80; }
-    .scroll-box .date-table thead th:first-child { position: sticky; left: 0; text-align: left; border-left: 0; }
-    .date-table tbody td:first-child { position: sticky; left: 0; z-index: 1; background: white; white-space: nowrap; }
+    .scroll-box .date-table thead th.cmdt-head { text-align: left; border-left: 0; }
+    .scroll-box .date-table thead th.src { position: sticky; left: 0; text-align: left; background: #1f3a5f; }
+    .date-table tbody td.src { position: sticky; left: 0; z-index: 1; background: white; white-space: nowrap; }
+    /* Commodity cells span the rows of their sources. */
+    .scroll-box td.cmdt { font-weight: bold; color: #1f3a5f; background: #f5f7fa; border-right: 1px solid #e4e7eb; }
+    .ss-cmdt { font-weight: bold; color: white; background: #1f3a5f; border-radius: 4px; padding: 4px 10px; margin: 12px 0 6px; }
     .scroll-box .date-table tfoot td:first-child { left: 0; z-index: 2; white-space: nowrap; }
     .date-table td.day-sail, .date-table td.day-total { border-left: 1px solid #e4e7eb; }
     .date-table tbody td.day-sail { background: #fff8e1; font-weight: bold; }
+    /* Sub total row after each commodity. */
+    .date-table tbody tr.subtotal td { background: #dde6f0; font-weight: bold; color: #1f3a5f; border-bottom: 2px solid #1f3a5f; }
 </style>
 
 <div class="card">
@@ -118,7 +124,7 @@
 <div class="card">
     <h3 style="margin-top: 0; margin-bottom: 4px;">En-route Loaded Rakes (Last {{ days }} Days): SAIL and Others Loading from the Same Source</h3>
     <p style="margin: 0 0 12px; color: #52606d;">
-        Rakes loaded {{ shared.start.strftime('%d-%m-%Y') }} to {{ shared.end.strftime('%d-%m-%Y') }} at stations that loaded for consignee {{ sail }}.
+        Rakes loaded {{ shared.start.strftime('%d-%m-%Y') }} to {{ shared.end.strftime('%d-%m-%Y') }} at stations that loaded for consignee {{ sail }}, by commodity.
     </p>
     {% if shared.history_from %}
     <p class="warn">
@@ -132,6 +138,7 @@
             <table>
                 <thead>
                     <tr>
+                        <th>Commodity</th>
                         <th>Source Station (Code)</th>
                         <th class="num">{{ sail }}</th>
                         <th class="num">Others</th>
@@ -141,20 +148,23 @@
                     </tr>
                 </thead>
                 <tbody>
-                    {% for row in shared.rows %}
+                    {% for group in shared.groups %}
+                    {% for row in group.rows %}
                     <tr>
+                        {% if loop.first %}<td class="cmdt" rowspan="{{ group.rows|length }}">{{ group.commodity }}</td>{% endif %}
                         <td>{{ row.source }}</td>
-                        <td class="num"><b>{{ row.sail }}</b></td>
+                        <td class="num"><b>{{ row.sail or '' }}</b></td>
                         <td class="num">{{ row.others or '' }}</td>
                         <td class="num"><b>{{ row.total }}</b></td>
                         <td class="num share">{{ row.sail_share }}%</td>
                         <td>{{ chips(row.other_parties, sail) }}</td>
                     </tr>
                     {% endfor %}
+                    {% endfor %}
                 </tbody>
                 <tfoot>
                     <tr>
-                        <td>All sources ({{ shared.rows|length }})</td>
+                        <td colspan="2">All sources ({{ shared.source_count }})</td>
                         <td class="num">{{ shared.sail }}</td>
                         <td class="num">{{ shared.others }}</td>
                         <td class="num">{{ shared.total }}</td>
@@ -166,15 +176,18 @@
         </div>
     </div>
     <div class="phone-only">
-        {% for row in shared.rows %}
+        {% for group in shared.groups %}
+        <div class="ss-cmdt">{{ group.commodity }}</div>
+        {% for row in group.rows %}
         <div class="ss-card">
             <div class="ss-head"><span>{{ row.source }}</span><span>{{ row.total }}</span></div>
             <div class="ss-counts">{{ sail }} <b>{{ row.sail }}</b> &middot; Others <b>{{ row.others }}</b> <span class="share">({{ row.sail_share }}% {{ sail }})</span></div>
             {{ chips(row.other_parties, sail) }}
         </div>
         {% endfor %}
+        {% endfor %}
         <div class="ss-card" style="background: #1f3a5f; color: white;">
-            <div class="ss-head" style="color: white;"><span>All sources ({{ shared.rows|length }})</span><span>{{ shared.total }}</span></div>
+            <div class="ss-head" style="color: white;"><span>All sources ({{ shared.source_count }})</span><span>{{ shared.total }}</span></div>
             {{ sail }} <b>{{ shared.sail }}</b> &middot; Others <b>{{ shared.others }}</b>
         </div>
     </div>
@@ -184,6 +197,7 @@
     <p class="note">
         Every list sent in these {{ days }} days counts, so rakes already delivered are still included; a rake that
         appears in several lists is counted once, by Rake ID and loading time (LDNG TIME). {{ sail }} means consignee (CNSG) {{ sail }}.
+        Every commodity loaded at these stations is listed, so a row can have no {{ sail }} rakes when {{ sail }} took a different commodity from that station.
     </p>
 </div>
 
@@ -192,13 +206,14 @@
     <h3 style="margin-top: 0; margin-bottom: 4px;">Date-wise Loading (Last {{ days }} Days): {{ sail }} and Others from Sources Loading for {{ sail }}</h3>
     <p style="margin: 0 0 12px; color: #52606d;">
         Rakes loaded on each date, {{ shared.start.strftime('%d-%m-%Y') }} to {{ shared.end.strftime('%d-%m-%Y') }}, at the
-        {{ shared.rows|length }} stations that loaded for consignee {{ sail }}. The loading date is the date in LDNG TIME.
+        {{ shared.source_count }} stations that loaded for consignee {{ sail }}, by commodity. The loading date is the date in LDNG TIME.
     </p>
     <div class="scroll-box">
         <table class="date-table">
             <thead>
                 <tr>
-                    <th rowspan="2">Source Station (Code)</th>
+                    <th rowspan="2" class="cmdt-head">Commodity</th>
+                    <th rowspan="2" class="src">Source Station (Code)</th>
                     {% for day in shared.dates %}
                     <th colspan="2">{{ day.strftime('%d-%m-%Y') }}<br>{{ day.strftime('%a') }}</th>
                     {% endfor %}
@@ -215,22 +230,35 @@
                 </tr>
             </thead>
             <tbody>
-                {% for row in shared.rows %}
+                {% for group in shared.groups %}
+                {% for row in group.rows %}
                 <tr>
-                    <td>{{ row.source }}</td>
+                    {% if loop.first %}<td class="cmdt" rowspan="{{ group.rows|length }}">{{ group.commodity }}</td>{% endif %}
+                    <td class="src">{{ row.source }}</td>
                     {% for sail_count, other_count in row.daily %}
                     <td class="num day-sail">{{ sail_count or '' }}</td>
                     <td class="num">{{ other_count or '' }}</td>
                     {% endfor %}
-                    <td class="num day-total"><b>{{ row.sail }}</b></td>
+                    <td class="num day-total"><b>{{ row.sail or '' }}</b></td>
                     <td class="num">{{ row.others or '' }}</td>
                     <td class="num"><b>{{ row.total }}</b></td>
+                </tr>
+                {% endfor %}
+                <tr class="subtotal">
+                    <td class="src" colspan="2">{{ group.commodity }} sub total</td>
+                    {% for sail_count, other_count in group.daily %}
+                    <td class="num day-sail">{{ sail_count or '' }}</td>
+                    <td class="num">{{ other_count or '' }}</td>
+                    {% endfor %}
+                    <td class="num day-total">{{ group.sail or '' }}</td>
+                    <td class="num">{{ group.others or '' }}</td>
+                    <td class="num">{{ group.total }}</td>
                 </tr>
                 {% endfor %}
             </tbody>
             <tfoot>
                 <tr>
-                    <td>All sources ({{ shared.rows|length }})</td>
+                    <td colspan="2">All sources ({{ shared.source_count }})</td>
                     {% for sail_count, other_count in shared.daily %}
                     <td class="num">{{ sail_count }}</td>
                     <td class="num">{{ other_count }}</td>
