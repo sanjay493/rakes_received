@@ -1,0 +1,233 @@
+{% extends "base.html" %}
+
+{% macro breakdown(items) %}
+<div class="chips">
+    {% for label, count in items %}<span class="chip">{{ label }} <b>{{ count }}</b></span>{% endfor %}
+</div>
+{% endmacro %}
+
+{% block content %}
+<style>
+    .scroll-box { max-height: 70vh; overflow: auto; border: 1px solid #e4e7eb; }
+    .scroll-box table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 13px; }
+    .scroll-box th, .scroll-box td { padding: 6px 8px; text-align: left; vertical-align: top; border-bottom: 1px solid #e4e7eb; overflow-wrap: break-word; }
+    .scroll-box thead th { position: sticky; top: 0; z-index: 2; background: #1f3a5f; color: white; }
+    .scroll-box .nowrap { white-space: nowrap; }
+    .scroll-box .num { text-align: right; }
+    tr.stabled td { background: #fef3f2; }
+    tr.gone td { color: #7b8794; }
+    .st { color: #b42318; font-weight: bold; }
+    .tag { border-radius: 4px; padding: 1px 6px; white-space: nowrap; font-size: 12px; font-weight: bold; }
+    .tag-on { background: #d1f0d9; color: #17643a; }
+    .tag-off { background: #e4e7eb; color: #52606d; }
+    .chips { display: flex; flex-wrap: wrap; gap: 4px 6px; }
+    .chip { background: #e8eef5; border-radius: 4px; padding: 1px 6px; white-space: nowrap; font-size: 13px; }
+    .breakdowns { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px 20px; margin: 14px 0; }
+    .breakdowns h4 { margin: 0 0 6px; color: #1f3a5f; }
+    .summary { display: flex; flex-wrap: wrap; gap: 10px; margin: 12px 0; }
+    .summary div { background: #e8eef5; border-radius: 6px; padding: 8px 14px; }
+    .summary b { display: block; font-size: 20px; color: #1f3a5f; }
+    .tools { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: flex-end; margin: 12px 0; }
+    .tools label { font-size: 13px; }
+    .tools input { width: auto; margin: 0; }
+    .tools .find { flex: 1 1 220px; }
+    .tools .find input { width: 100%; box-sizing: border-box; }
+    .tools button, .tools a.clear { margin: 0; min-width: 0; }
+    .note { margin: 10px 0 0; font-size: 13px; color: #52606d; }
+    /* Phones: one card per rake instead of the table. */
+    .phone-only { display: none; }
+    @media (max-width: 700px) {
+        .desk-only { display: none; }
+        .phone-only { display: block; }
+    }
+    .rd-card { border: 1px solid #e4e7eb; border-radius: 6px; padding: 8px 10px; margin-bottom: 8px; font-size: 14px; }
+    .rd-card.stabled { background: #fef3f2; }
+    .rd-card.gone { color: #7b8794; }
+    .rd-head { display: flex; justify-content: space-between; gap: 8px; font-weight: bold; color: #1f3a5f; margin-bottom: 4px; }
+    .rd-fields { display: grid; grid-template-columns: max-content 1fr; gap: 2px 10px; margin: 0; font-size: 13px; }
+    .rd-fields dt { color: #52606d; }
+    .rd-fields dd { margin: 0; overflow-wrap: anywhere; }
+</style>
+
+<div class="card">
+    <h2 style="margin: 0;">{{ wagon_type }} Rakes</h2>
+    <p style="margin: 6px 0 0; color: #52606d;">
+        Every {{ wagon_type }} rake in the Loaded In-Bound lists and in the received rakes.
+    </p>
+    <div class="summary">
+        <div><b>{{ en_route_count }}</b>en route now</div>
+        <div><b>{{ inbound_rakes|length - en_route_count }}</b>seen in earlier lists</div>
+        <div><b>{{ received|length }}</b>received{% if received|length != received_total %} (of {{ received_total }}){% endif %}</div>
+    </div>
+</div>
+
+<div class="card">
+    <h3 style="margin-top: 0;">Loaded In-Bound: {{ wagon_type }} Rakes ({{ inbound_rakes|length }})</h3>
+    {% if inbound_rakes %}
+    <p class="note" style="margin-top: 0;">
+        From the lists received between {{ first_list.strftime('%d-%m-%Y %H:%M') }} and {{ latest_at.strftime('%d-%m-%Y %H:%M') }} IST.
+        Each rake is shown once, as it was in the last list that had it.
+        {{ en_route_count }} are in the latest list{% if stabled_count %}, {{ stabled_count }} of them stabled (ST){% endif %}.
+    </p>
+    {% if en_route_count %}
+    <div class="breakdowns">
+        <div><h4>En route now, by destination</h4>{{ breakdown(inbound_by_destination) }}</div>
+        <div><h4>En route now, by commodity</h4>{{ breakdown(inbound_by_commodity) }}</div>
+    </div>
+    {% endif %}
+    <div class="tools">
+        <label class="find">Find in this table
+            <input type="search" data-find="inboundRows" placeholder="Station, rake ID, commodity, consignee...">
+        </label>
+    </div>
+    <div class="desk-only">
+        <div class="scroll-box">
+            <table>
+                <thead>
+                    <tr>
+                        <th>In latest list</th>
+                        <th>Loaded</th>
+                        <th>From</th>
+                        <th>To</th>
+                        <th>Consigner</th>
+                        <th>Consignee</th>
+                        <th>Commodity</th>
+                        <th>Units</th>
+                        <th>Rake ID</th>
+                        <th>Rake Name</th>
+                        <th>Current Location</th>
+                        <th>Status</th>
+                        <th>Expected Arrival</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for rake in inbound_rakes %}
+                    <tr data-row="inboundRows" class="{% if not rake.en_route %}gone{% elif rake.stabled %}stabled{% endif %}">
+                        <td class="nowrap">
+                            {% if rake.en_route %}<span class="tag tag-on">En route</span>
+                            {% else %}<span class="tag tag-off">Last seen {{ rake.imported_at.strftime('%d-%m %H:%M') }}</span>{% endif %}
+                        </td>
+                        <td class="nowrap">{{ rake.ldng_time or '—' }}</td>
+                        <td>{{ rake.source }}</td>
+                        <td>{{ rake.destination }}</td>
+                        <td>{{ rake.cnsr or '' }}</td>
+                        <td>{{ rake.cnsg or '' }}</td>
+                        <td>{{ rake.commodity_name }}</td>
+                        <td class="nowrap">{{ rake.totl_unts or '' }}</td>
+                        <td class="nowrap">{{ rake.rake_id or '' }}</td>
+                        <td>{{ rake.load_name or '' }}</td>
+                        <td>{{ rake.crnt_locn or '' }}</td>
+                        <td class="nowrap{% if rake.stabled and rake.en_route %} st{% endif %}">{{ rake.stts_code or '' }}{% if rake.stabled %} (stabled){% endif %}</td>
+                        <td class="nowrap">{{ rake.expd_arvl_time or '' }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    <div class="phone-only">
+        {% for rake in inbound_rakes %}
+        <div data-row="inboundRows" class="rd-card{% if not rake.en_route %} gone{% elif rake.stabled %} stabled{% endif %}">
+            <div class="rd-head">
+                <span>{{ rake.ldng_time or 'No loading time' }}</span>
+                {% if rake.en_route %}<span class="tag tag-on">En route</span>
+                {% else %}<span class="tag tag-off">Last seen {{ rake.imported_at.strftime('%d-%m %H:%M') }}</span>{% endif %}
+            </div>
+            <dl class="rd-fields">
+                <dt>From &rarr; To</dt><dd>{{ rake.source }} &rarr; {{ rake.destination }}</dd>
+                <dt>Consigner / Consignee</dt><dd>{{ rake.cnsr or '—' }} / {{ rake.cnsg or '—' }}</dd>
+                <dt>Commodity</dt><dd>{{ rake.commodity_name }}{% if rake.totl_unts %} ({{ rake.totl_unts }} units){% endif %}</dd>
+                <dt>Rake ID</dt><dd>{{ rake.rake_id or '' }}</dd>
+                <dt>Rake Name</dt><dd>{{ rake.load_name or '' }}</dd>
+                <dt>Current Location</dt><dd>{{ rake.crnt_locn or '' }} {{ rake.stts_code or '' }}{% if rake.stabled %} (stabled){% endif %}</dd>
+                <dt>Expected Arrival</dt><dd>{{ rake.expd_arvl_time or '' }}</dd>
+            </dl>
+        </div>
+        {% endfor %}
+    </div>
+    <p class="note">
+        Rakes in the latest list come first. A greyed rake is no longer in the latest list: it has reached its
+        destination, or the latest list did not cover it. Its location and status are from the last list that had it.
+    </p>
+    {% else %}
+    <p>No {{ wagon_type }} rake is in any Loaded In-Bound list received so far.</p>
+    {% endif %}
+</div>
+
+<div class="card">
+    <h3 style="margin-top: 0;">Received Rakes: {{ wagon_type }} ({{ received|length }})</h3>
+    <form method="get" class="tools">
+        <label>Received from
+            <input type="date" name="from" value="{{ date_from.isoformat() if date_from else '' }}">
+        </label>
+        <label>to
+            <input type="date" name="to" value="{{ date_to.isoformat() if date_to else '' }}">
+        </label>
+        <button type="submit">Apply</button>
+        {% if date_from or date_to %}<a class="clear" href="{{ url_for('bobsnm1') }}">Show all</a>{% endif %}
+        <label class="find">Find in this table
+            <input type="search" data-find="receivedRows" placeholder="Station, plant, commodity...">
+        </label>
+    </form>
+    {% if received %}
+    <div class="summary">
+        <div><b>{{ received|length }}</b>rakes{% if date_from or date_to %} in the chosen dates{% endif %}</div>
+        {% if average_hours is not none %}<div><b>{{ average_hours }}</b>average transit hours</div>{% endif %}
+    </div>
+    <div class="breakdowns">
+        <div><h4>By plant</h4>{{ breakdown(received_by_plant) }}</div>
+        <div><h4>By commodity</h4>{{ breakdown(received_by_commodity) }}</div>
+        <div><h4>By loading station</h4>{{ breakdown(received_by_source) }}</div>
+    </div>
+    <div class="scroll-box">
+        <table>
+            <thead>
+                <tr>
+                    <th>Received</th>
+                    <th>Dispatched</th>
+                    <th>From</th>
+                    <th>Plant</th>
+                    <th>Commodity</th>
+                    <th class="num">Units</th>
+                    <th class="num">Transit Time</th>
+                    <th class="num">Transit Hrs</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for rake in received %}
+                <tr data-row="receivedRows">
+                    <td class="nowrap">{{ rake.received_time.strftime('%d-%m-%Y %H:%M') if rake.received_time else '—' }}</td>
+                    <td class="nowrap">{{ rake.dispatched_time.strftime('%d-%m-%Y %H:%M') if rake.dispatched_time else '—' }}</td>
+                    <td>{{ rake.source }}</td>
+                    <td>{{ rake.sttn_to or '' }}</td>
+                    <td>{{ rake.commodity_name }}</td>
+                    <td class="num">{{ rake.totl_unts if rake.totl_unts is not none else '' }}</td>
+                    <td class="num nowrap">{{ rake.transit_time or '' }}</td>
+                    <td class="num">{{ '%.2f'|format(rake.transit_time_hrs) if rake.transit_time_hrs is not none else '' }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    <p class="note">Latest received first. The received rakes data has no rake ID, so a received rake cannot be matched to its In-Bound entry above.</p>
+    {% else %}
+    <p>No {{ wagon_type }} rake was received{% if date_from or date_to %} in the chosen dates{% endif %}.</p>
+    {% endif %}
+</div>
+
+<script>
+    // Each "Find" box hides the rows (and phone cards) of its table that don't contain the typed text.
+    document.querySelectorAll('input[data-find]').forEach(function (box) {
+        var rows = document.querySelectorAll('[data-row="' + box.dataset.find + '"]');
+        box.addEventListener('input', function () {
+            var words = box.value.trim().toLowerCase().split(/\s+/).filter(Boolean);
+            rows.forEach(function (row) {
+                var text = row.textContent.toLowerCase();
+                row.style.display = words.every(function (word) { return text.indexOf(word) !== -1; }) ? '' : 'none';
+            });
+        });
+        // Enter in the box must not submit the date form.
+        box.addEventListener('keydown', function (event) { if (event.key === 'Enter') event.preventDefault(); });
+    });
+</script>
+{% endblock %}

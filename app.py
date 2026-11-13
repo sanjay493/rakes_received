@@ -854,6 +854,9 @@ def index():
 # ------------------ ALL-INDIA EN-ROUTE ------------------
 
 SAIL_CONSIGNEE = "SAIL"  # CNSG of rakes for SAIL, at the plants and at its stockyards
+# In the In-Bound loading-date table, this commodity (its name in the commodity mappings) lists only
+# consignee SAIL's rakes, to every destination in the list.
+SAIL_ONLY_COMMODITY = "IRON ORE"
 SHARED_SOURCE_DAYS = 7
 
 def is_sail(cnsg):
@@ -1071,6 +1074,84 @@ def enroute_rakes():
         sail=SAIL_CONSIGNEE,
     )
 
+WAGON_PAGE_TYPE = "BOBSNM1"  # Wagon type listed on the /bobsnm1 page
+
+def page_date(name):
+    """A date from the query string ("2026-11-13"), or None when it is blank or unreadable."""
+    try:
+        return datetime.strptime(request.args.get(name, "").strip(), "%Y-%m-%d").date()
+    except ValueError:
+        return None
+
+@app.route("/bobsnm1")
+def bobsnm1():
+    """Every BOBSNM1 rake: those in the Loaded In-Bound lists (each rake once, as it was last seen)
+    and those in the received rakes, which follow the page's date filter."""
+    date_from, date_to = page_date("from"), page_date("to")
+    session = SessionDB()
+    try:
+        latest_at = session.query(func.max(InboundRake.imported_at)).scalar()
+        snapshots = (
+            session.query(InboundRake)
+            .filter(func.upper(func.trim(func.coalesce(InboundRake.load_type, ""))) == WAGON_PAGE_TYPE)
+            .order_by(InboundRake.imported_at, InboundRake.id)
+            .all()
+        )
+        query = session.query(Rake).filter(
+            func.upper(func.trim(func.coalesce(Rake.rake_type, ""))) == WAGON_PAGE_TYPE
+        )
+        received_total = query.count()
+        if date_from:
+            query = query.filter(Rake.received_time >= datetime.combine(date_from, datetime.min.time()))
+        if date_to:
+            query = query.filter(Rake.received_time < datetime.combine(date_to + timedelta(days=1), datetime.min.time()))
+        received = query.order_by(Rake.received_time.desc(), Rake.id.desc()).all()
+    finally:
+        session.close()
+
+    # A rake is in every list sent while it travels: keep its last snapshot. Lists are read oldest
+    # first, so a later one replaces an earlier one.
+    seen = {}
+    for rake in snapshots:
+        rake.loaded = loading_datetime(rake.ldng_time)
+        key = ((rake.rake_id or "").strip() or (rake.load_name or "").strip(), rake.ldng_time, station_code(rake.sttn_from))
+        seen[key] = rake
+    inbound_rakes = list(seen.values())
+    for rake in inbound_rakes:
+        rake.source = station_label(station_code(rake.sttn_from))
+        rake.destination = station_label(station_code(rake.sttn_to))
+        rake.commodity_name = commodity_name(rake.cmdt)
+        rake.stabled = is_stabled(rake)
+        rake.en_route = rake.imported_at == latest_at
+    # Rakes still en route first, then the most recently seen; within those, the latest loading first.
+    inbound_rakes.sort(key=lambda rake: (
+        not rake.en_route, -rake.imported_at.timestamp(), -(rake.loaded or datetime.min).timestamp() if rake.loaded else 0, rake.id
+    ))
+
+    for rake in received:
+        rake.source = station_label(station_code(rake.sttn_from))
+        rake.commodity_name = rake.commodity or commodity_name(rake.cmdt)
+    hours = [rake.transit_time_hrs for rake in received if rake.transit_time_hrs is not None]
+    return render_template(
+        "bobsnm1.html",
+        wagon_type=WAGON_PAGE_TYPE,
+        latest_at=latest_at,
+        inbound_rakes=inbound_rakes,
+        en_route_count=sum(rake.en_route for rake in inbound_rakes),
+        stabled_count=sum(rake.stabled and rake.en_route for rake in inbound_rakes),
+        first_list=min((rake.imported_at for rake in snapshots), default=None),
+        inbound_by_destination=counted(rake.destination for rake in inbound_rakes if rake.en_route),
+        inbound_by_commodity=counted(rake.commodity_name for rake in inbound_rakes if rake.en_route),
+        received=received,
+        received_total=received_total,
+        average_hours=round(sum(hours) / len(hours), 1) if hours else None,
+        received_by_plant=sorted(Counter(rake.sttn_to or "—" for rake in received).items(), key=lambda kv: plant_sort_key(kv[0])),
+        received_by_commodity=counted(rake.commodity_name for rake in received),
+        received_by_source=counted(rake.source for rake in received),
+        date_from=date_from,
+        date_to=date_to,
+    )
+
 def inbound_data(destination):
     """Everything the In-Bound page and its downloads show: the latest list's rakes going to the
     plants and pellet agents. Rakes to other destinations stay saved but aren't shown."""
@@ -1088,6 +1169,16 @@ def inbound_data(destination):
         if destination:
             latest = latest.filter(InboundRake.sttn_to == destination)
         rakes = latest.order_by(InboundRake.id).all()
+        # For the loading-date table: SAIL's rakes of SAIL_ONLY_COMMODITY going anywhere else. Only an
+        # all-India list has any, and a destination filter leaves them out.
+        elsewhere = [] if destination else [
+            rake for rake in session.query(InboundRake).filter(
+                InboundRake.imported_at == imported_at,
+                not_plant_list(),
+                func.upper(func.trim(func.coalesce(InboundRake.cnsg, ""))) == SAIL_CONSIGNEE,
+            ).order_by(InboundRake.id).all()
+            if (rake.sttn_to or "").strip() and commodity_name(rake.cmdt) == SAIL_ONLY_COMMODITY
+        ]
         distances = {(d.from_code, d.to_code): d.km for d in session.query(RailDistance).all()}
     finally:
         session.close()
@@ -1100,7 +1191,12 @@ def inbound_data(destination):
     return {
         "rakes": rakes,
         "report": commodity_plant_report(rakes),
-        "routes": route_date_report(rakes),
+        # Iron ore shows only consignee SAIL, to every destination; other commodities are unchanged.
+        "routes": route_date_report([
+            rake for rake in rakes
+            if rake.commodity_name != SAIL_ONLY_COMMODITY or is_sail(rake.cnsg)
+        ] + elsewhere),
+        "sail_only_commodity": SAIL_ONLY_COMMODITY,
         "plants": PLANTS,  # Columns of the Rakes in Transit table
         "distance_pairs": len(distances),
         "distance_pairs_with_km": sum(km is not None for km in distances.values()),

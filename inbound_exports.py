@@ -28,7 +28,11 @@ NOTES = [
 
 DETAIL_TITLE = "Rake Details"
 ROUTE_TITLE = "En-route Rakes by Commodity, Source, Destination and Loading Date"
-ROUTE_NOTE = "Each date column (day-month) counts the rakes loaded that day, from LDNG TIME on FOIS."
+ROUTE_NOTE = (
+    "Each date column (day-month) counts the rakes loaded that day, from LDNG TIME on FOIS. "
+    "IRON ORE shows only the rakes with consignee SAIL, to every destination in the list; "
+    "the other commodities show the rakes to the plants and pellet agents."
+)
 
 
 # (heading, value for a rake, width in the PDF in points). Values read as on the page.
