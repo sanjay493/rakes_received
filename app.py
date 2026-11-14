@@ -1773,6 +1773,30 @@ def dashboard():
         total_records=len(df) if not df.empty else 0
     )
 
+def rakes_in_transit(session, commodity="", plant=""):
+    """({(commodity name, plant, source name): loaded rakes on the way}, when the list was taken), from
+    the latest In-Bound list's rakes going to the plant yards, for the chosen commodity and plant
+    (blank for all)."""
+    imported_at = session.query(func.max(InboundRake.imported_at)).scalar()
+    counts = Counter()
+    if not imported_at:
+        return counts, None
+    rows = session.query(
+        InboundRake.cmdt, InboundRake.sttn_to, InboundRake.sttn_from, InboundRake.loaded_empty
+    ).filter(
+        InboundRake.imported_at == imported_at,
+        func.upper(func.trim(InboundRake.sttn_to)).in_(list(DESTINATION_PLANTS)),
+    ).all()
+    for cmdt, yard, source, loaded_empty in rows:
+        if (loaded_empty or "").strip().upper() == "E":
+            continue
+        # Sources are named as on the page's rows, which show the station mappings' names.
+        source = get_station_display_name((source or "").strip().upper()) or "—"
+        key = (commodity_name(cmdt), DESTINATION_PLANTS[yard.strip().upper()], source)
+        if (not commodity or key[0] == commodity) and (not plant or key[1] == plant):
+            counts[key] += 1
+    return counts, imported_at
+
 def commodity_analysis_data(selected_commodity="", selected_destination=""):
     """Everything the Commodity Analysis page and its downloads show: transit time by commodity,
     destination plant and source station, for the chosen commodity and destination (blank for all)."""
@@ -2012,8 +2036,31 @@ def commodity_analysis_data(selected_commodity="", selected_destination=""):
                 'best_weekly_count': best_weekly_count
             })
     
+    in_transit, inbound_imported_at = rakes_in_transit(session_db, selected_commodity, selected_destination)
     session_db.close()
-    
+
+    # Loaded rakes on the way, per row. A source with rakes on the way but none received yet gets
+    # a row of its own with empty periods.
+    for item in analysis_data:
+        item['in_transit'] = in_transit.pop((item['commodity'], item['destination'], item['source']), 0)
+    for (commodity, destination, source), count in in_transit.items():
+        analysis_data.append({
+            'commodity': commodity,
+            'destination': destination,
+            'source': source,
+            'in_transit': count,
+            'months_data': [{'avg': None, 'count': 0} for _ in range(4)],
+            'weeks_data': [{'avg': None, 'count': 0} for _ in range(4)],
+            'days_data': [{'avg': None, 'count': 0} for _ in range(4)],
+            'avg_4m': None, 'count_4m': 0,
+            'avg_8w': None, 'count_8w': 0,
+            'avg_4d': None, 'count_4d': 0,
+            'best_monthly': None, 'best_monthly_count': 0,
+            'best_fortnightly': None, 'best_fortnightly_count': 0,
+            'best_weekly': None, 'best_weekly_count': 0,
+        })
+    analysis_data.sort(key=lambda item: item['source'])
+
     # Group data by commodity and destination for display
     grouped_data = {}
     for item in analysis_data:
@@ -2033,6 +2080,7 @@ def commodity_analysis_data(selected_commodity="", selected_destination=""):
         "header_months": header_months,
         "header_weeks": header_weeks,
         "header_days": header_days,
+        "inbound_imported_at": inbound_imported_at,
     }
 
 PICK_SEPARATOR = "||"  # Between the commodity and the source in a ticked box's value

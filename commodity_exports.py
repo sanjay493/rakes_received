@@ -22,6 +22,8 @@ BEST = [
 ]
 # Light fills marking the column groups, as on the page.
 GROUP_FILLS = ["E3F2FD", "E0F2F1", "FFF3E0", "F3E5F5"]
+TRANSIT = "In Transit"  # Heading of the loaded rakes on the way from the source
+TRANSIT_FILL = "E8EAF6"
 NOTES = [
     "Average transit time is in hours. Months, weeks and days are counted back from yesterday.",
     "Best Monthly is the lowest monthly average in the last 12 months, Best Fortnightly the lowest "
@@ -64,6 +66,11 @@ def summary_line(data):
         f"{commodities} {'commodity' if commodities == 1 else 'commodities'}, "
         f"{sources} commodity-source {'pair' if sources == 1 else 'pairs'}, {len(rows)} rows."
     )
+    if data.get("inbound_imported_at"):
+        parts.append(
+            f"{TRANSIT} is the loaded rakes on the way in the In-Bound list of "
+            f"{data['inbound_imported_at'].strftime('%d-%m-%Y %H:%M')}."
+        )
     if data["customised"]:
         parts.append("Customised: only the ticked commodities and sources are included.")
     return " ".join(parts)
@@ -80,7 +87,10 @@ def build_excel(data):
     groups = period_groups(data)
     keys = ["Commodity", "Destination", "Source Station"]
     first_value = len(keys) + 1
-    columns = len(keys) + 2 * (SLOTS * len(groups) + len(BEST))
+    # The periods take two columns each (average, rakes), then In Transit takes one, then the best periods two each.
+    transit_column = first_value + 2 * SLOTS * len(groups)
+    columns = transit_column + 2 * len(BEST)
+    pair_starts = [*range(first_value, transit_column, 2), *range(transit_column + 1, columns + 1, 2)]
 
     put_text(sheet, 1, 1, TITLE).font = Font(bold=True, size=14)
     put_text(sheet, 2, 1, summary_line(data))
@@ -106,6 +116,9 @@ def build_excel(data):
             put_text(sheet, period_row, column, label).alignment = centre
             sheet.merge_cells(start_row=period_row, start_column=column, end_row=period_row, end_column=column + 1)
             column += 2
+    put_text(sheet, group_row, transit_column, TRANSIT).alignment = centre
+    put_text(sheet, header, transit_column, "Rakes").alignment = centre
+    column = transit_column + 1
     group_starts.append(column)
     put_text(sheet, group_row, column, "Best Periods").alignment = centre
     sheet.merge_cells(start_row=group_row, start_column=column, end_row=group_row, end_column=column + 2 * len(BEST) - 1)
@@ -113,9 +126,10 @@ def build_excel(data):
         put_text(sheet, period_row, column, heading).alignment = centre
         sheet.merge_cells(start_row=period_row, start_column=column, end_row=period_row, end_column=column + 1)
         column += 2
-    for column in range(first_value, columns + 1, 2):
+    for column in pair_starts:
         put_text(sheet, header, column, "Avg Hrs").alignment = centre
         put_text(sheet, header, column + 1, "Rakes").alignment = centre
+    for column in [*pair_starts, transit_column]:
         for row in (group_row, period_row, header):
             sheet.cell(row=row, column=column).border = Border(left=edge)
 
@@ -130,8 +144,10 @@ def build_excel(data):
         put_text(sheet, row, 2, item["destination"])
         put_text(sheet, row, 3, item["source"]).font = Font(bold=True)
         values = [pair for _, _, field in groups for pair in slots(item, field)] + best(item)
-        for index, (average, rakes) in enumerate(values):
-            column = first_value + 2 * index
+        transit_cell = sheet.cell(row=row, column=transit_column, value=item.get("in_transit") or None)
+        transit_cell.font = Font(bold=True)
+        transit_cell.fill = PatternFill("solid", fgColor=TRANSIT_FILL)
+        for column, (average, rakes) in zip(pair_starts, values):
             average_cell = sheet.cell(row=row, column=column, value=average)
             average_cell.number_format = "0.00"
             average_cell.font = Font(bold=True)
@@ -166,15 +182,17 @@ def block_table(data, items, styles):
     for heading, labels, _ in groups:
         top += [text_cell(heading, styles["cell_heading"])] + [""] * (SLOTS - 1)
         labels_row += [text_cell(label, styles["cell_heading"]) for label in (list(labels) + ["—"] * SLOTS)[:SLOTS]]
-    for heading, _, _ in BEST:
+    for heading in [TRANSIT] + [heading for heading, _, _ in BEST]:
         top.append(text_cell(heading, styles["cell_heading"]))
         labels_row.append("")
     rows = [top, labels_row]
     for item in items:
-        values = [pair for _, _, field in groups for pair in slots(item, field)] + best(item)
+        periods = [text_cell(cell_text(*pair), styles["cell"]) for _, _, field in groups for pair in slots(item, field)]
         rows.append(
             [text_cell(item["source"], styles["cell_bold"])]
-            + [text_cell(cell_text(average, rakes), styles["cell"]) for average, rakes in values]
+            + periods
+            + [text_cell(str(item.get("in_transit") or ""), styles["cell_bold"])]
+            + [text_cell(cell_text(*pair), styles["cell"]) for pair in best(item)]
         )
 
     navy = colors.HexColor(f"#{NAVY}")
@@ -195,13 +213,15 @@ def block_table(data, items, styles):
         if len(rows) > 2:
             commands.append(("BACKGROUND", (column, 2), (column + SLOTS - 1, -1), colors.HexColor(f"#{GROUP_FILLS[index]}")))
         column += SLOTS
-    for offset in range(len(BEST)):
+    # column is now In Transit; the best periods follow it.
+    for offset in range(1 + len(BEST)):
         commands.append(("SPAN", (column + offset, 0), (column + offset, 1)))
     if len(rows) > 2:
-        commands.append(("BACKGROUND", (column, 2), (-1, -1), colors.HexColor(f"#{GROUP_FILLS[-1]}")))
+        commands.append(("BACKGROUND", (column, 2), (column, -1), colors.HexColor(f"#{TRANSIT_FILL}")))
+        commands.append(("BACKGROUND", (column + 1, 2), (-1, -1), colors.HexColor(f"#{GROUP_FILLS[-1]}")))
 
     # 773 points fit inside the margins of a landscape A4 page.
-    table = Table(rows, colWidths=[122] + [43] * (SLOTS * len(groups)) + [45] * len(BEST), repeatRows=2, hAlign="LEFT")
+    table = Table(rows, colWidths=[110] + [41] * (SLOTS * len(groups)) + [36] + [45] * len(BEST), repeatRows=2, hAlign="LEFT")
     table.setStyle(TableStyle(commands))
     return table
 

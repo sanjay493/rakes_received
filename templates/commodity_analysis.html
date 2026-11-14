@@ -167,7 +167,7 @@
                 <span>{{ commodity }}</span>
                 <span style="font-size: 0.9em; opacity: 0.9;">→</span>
                 <span style="background: rgba(255,255,255,0.2); padding: 4px 12px; border-radius: 6px;">{{ destination }}</span>
-                <span style="margin-left: auto; font-size: 0.8em; opacity: 0.8;"> Avg Transit Time in Hrs | Rakes Count</span>
+                <span style="margin-left: auto; font-size: 0.8em; opacity: 0.8;"> Avg Transit Time in Hrs | Rakes Count{% if inbound_imported_at %} | In Transit as of {{ inbound_imported_at.strftime('%d-%m-%Y %H:%M') }}{% endif %}</span>
             </h3>
         </div>
 
@@ -191,6 +191,8 @@
                     <col style="width: 8%;">
                     <col style="width: 8%;">
                     <col style="width: 8%;">
+                    <!-- In Transit: 6% -->
+                    <col style="width: 6%;">
                     <!-- Best Monthly: 6% -->
                     <col style="width: 6%;">
                     <!-- Best Fortnightly: 6% -->
@@ -213,6 +215,9 @@
                         </th>
                         <th colspan="4" style="padding: 10px 4px; text-align: center; font-weight: bold; color: #f57c00; border-right: 1px solid #dee2e6; background: #fff3e0; font-size: 12px;">
                             Last 4 Days
+                        </th>
+                        <th rowspan="2" style="padding: 8px 2px; text-align: center; font-weight: bold; color: #283593; border-right: 1px solid #dee2e6; background: #e8eaf6; font-size: 10px; word-wrap: break-word; overflow-wrap: break-word; line-height: 1.2;">
+                            In Transit
                         </th>
                         <th rowspan="2" style="padding: 8px 2px; text-align: center; font-weight: bold; color: #7b1fa2; border-right: 1px solid #dee2e6; background: #f3e5f5; font-size: 10px; word-wrap: break-word; overflow-wrap: break-word; line-height: 1.2;">
                             Best Monthly*
@@ -329,6 +334,18 @@
                         </td>
                         {% endfor %}
                         
+                        <!-- In Transit: loaded rakes on the way from this source -->
+                        <td style="padding: 10px 4px; text-align: center; background: rgba(232, 234, 246, 0.5); border-right: 1px solid #dee2e6;">
+                            {% if item.in_transit %}
+                            <div style="display: inline-block; background: #283593; color: white; border-radius: 50%; width: 32px; height: 32px; line-height: 32px; font-weight: bold; font-size: 12px; cursor: help;"
+                                 title="Loaded rakes in transit from this source">
+                                {{ item.in_transit }}
+                            </div>
+                            {% else %}
+                            <div style="color: #999; font-size: 13px;">—</div>
+                            {% endif %}
+                        </td>
+
                         <!-- Best Monthly -->
                         <td style="padding: 10px 4px; text-align: center; background: rgba(243, 229, 245, 0.4); border-right: 1px solid #dee2e6;">
                             <div style="font-weight: 700; color: #7b1fa2; font-size: 13px; margin-bottom: 4px;">
