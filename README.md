@@ -134,12 +134,13 @@ To send the Loaded In-Bound list automatically every 5 hours:
 
 Every 5 hours the extension then reloads the report in that tab, waits for it to finish loading and sends it. It can't log in to FOIS: if the report doesn't come back after the reload (FOIS logged out, or the tab was closed), nothing is sent, the icon shows a red **!** and the popup says why. Chrome, the FOIS tab and the dashboard must be left running, and the computer must stay awake. After Chrome restarts, the extension looks for the report in any open tab of the same site. Untick the box to stop. To change the interval, edit `PERIOD_MINUTES` in `background.js`.
 
-It recognises two reports by their headings:
+It recognises three reports by their headings:
 
 | Report | Required headings | What happens on send |
 | --- | --- | --- |
 | Rakes Received | `Sr No`, `Received Time`, `Dispatched Time`, `Transit Time`, `Sttn From`, `Sttn To`, `Cmdt`, `Totl Unts`, `Rake Type` | Rows are added to the dashboard. Rows already there are skipped, so sending twice is safe. |
 | Loaded In-Bound | `Crnt Locn`, `Stts Time`, `Sttn From`, `Sttn To`, `Rake Id`, `Expd Arvltime` | The rows become the latest list on the `/inbound` page. Older lists stay in the database but aren't shown. |
+| ODR Wise Rake Outstanding Details | `Sr No`, `Sttn From`, `Demand No.`, `Demand Date`, `Cnsg`, `Indented Units`, `Ostg Units`, `Demand Id` | The rows become the latest list on the `/indents` page. Older lists stay in the database but aren't shown. |
 
 Select **Show All** before sending, because the extension only reads rows that are on the page. A Loaded In-Bound report that's filtered or only partly shown becomes the whole latest list, so send the complete report.
 
@@ -156,5 +157,16 @@ The km left is the goods distance from `CRNT LOCN` to `STTN TO` on the Railways'
 The same tab first looks up station names on [FOIS Station Help](https://fois.indianrail.gov.in/FOISWebPortal/pages/FWP_SttnHelp.jsp), for each `STTN FROM` and `STTN TO` of those rakes that has no name in the station mappings yet. Found names are added to the station mappings, where they can be edited on the config page; a name already there is never replaced. Every code looked up is recorded in the `station_lookups` table, with an empty name when FOIS doesn't know it, so it's only asked once. FOIS names can be cut short at about 30 characters, and sidings show the firm's name (for example `BSPC` is "M/S. STEEL AUTHORITY OF INDIA"), so edit any that read badly. A lookup that fails, such as when FOIS says its server isn't running, is tried again on the next send.
 
 The **BOBSNM1** page (`/bobsnm1`) lists every `BOBSNM1` rake. Its Loaded In-Bound table takes the rakes from every saved list, each once (by Rake ID, `LDNG TIME` and source) as it was in the last list that had it, and marks those still in the latest list. Its Received Rakes table shows the last 30 days unless dates are chosen; **Show all** lists every one. A first table compares loading in `BOBSN` wagons (`BOBSNM1`, `BOBSNS`) for consignees `SAIL` and `TISC` (TISCO) on each of the last 7 loading dates, with the wagon types and loading stations; it's counted like the All-India page's 7-day tables. To compare other consignees or wagons, edit `COMPARE_CONSIGNEES` and `COMPARE_WAGON_PREFIX` in `app.py`.
+
+The **Pending Indents** page (`/indents`) shows the latest "ODR Wise Rake Outstanding Details" list from FOIS. Open that report with SAIL's and the other parties' indents at the same sources, and send it with the extension; or load the CSV file downloaded from that page, on the page itself. An indent is the rows from one filled `SR.NO.` to the next, so a two-point indent is one rake. It is **supplied** when FOIS shows a `SUPPLIED TIME` (the rake is placed, though its wagons stay outstanding until loading is done), **pending** when at least half its wagons are outstanding, and **part supplied** below that. The page has four tables: SAIL's pending rakes at each source by age, with the other parties' pending indents and the rakes loaded there for SAIL and for others in the last 7 days (from the All-India lists); pending indents, rakes in transit and rakes received for each plant and commodity; steel indents at each plant by wagon type; and the full list. A source is shaded when a SAIL indent has waited over 7 days while rakes were loaded there for others. Iron and steel loaded at a plant yard, or sent by consigner `SAIL` from another siding, counts as steel going out. Excel and PDF downloads cover the first three tables.
+
+## Tests
+
+```
+.\venv\Scripts\python.exe -m pip install -r requirements-dev.txt
+.\venv\Scripts\python.exe -m pytest tests
+```
+
+The tests run against a copy of the database in a temporary folder.
 
 If the site moves to another address, update `REPORTS` in `popup.js`, `INBOUND_URL` in `background.js`, the URLs in `lookup.js` and `host_permissions` in `manifest.json`.

@@ -5,7 +5,7 @@ import hmac, math, os, io, re, shutil, zipfile
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import create_engine, func, text, Column, Integer, String, Float, DateTime, UniqueConstraint
+from sqlalchemy import create_engine, func, text, Column, Integer, String, Float, Date, DateTime, UniqueConstraint
 from sqlalchemy.engine import URL
 from sqlalchemy.orm import declarative_base
 from sqlalchemy.orm import sessionmaker
@@ -14,6 +14,8 @@ from sqlalchemy.exc import IntegrityError
 
 from inbound_exports import build_excel, build_pdf
 import commodity_exports
+import indent_exports
+import indents as indent_rules
 
 # ------------------ APP SETUP ------------------
 
@@ -51,7 +53,7 @@ if os.environ.get("REQUIRE_AUTH") == "1" and not APP_PASSWORD:
 def require_login():
     # The import endpoints check API_TOKEN themselves.
     if not APP_PASSWORD or request.endpoint in (
-        "healthz", "import_rakes", "import_inbound", "import_distances", "import_station_names",
+        "healthz", "import_rakes", "import_inbound", "import_odr", "import_distances", "import_station_names",
     ):
         return None
 
@@ -127,6 +129,42 @@ class InboundRake(Base):
     loco_no = Column(String)
     loco_type = Column(String)
     expd_arvl_time = Column(String)
+
+class OdrIndent(Base):
+    """One row of a FOIS "ODR Wise Rake Outstanding Details" list: a pending indent, or a further part
+    of the indent above it. Each import adds a new list; the Pending Indents page shows the latest."""
+    __tablename__ = "odr_indents"
+
+    id = Column(Integer, primary_key=True)
+    imported_at = Column(DateTime, index=True, nullable=False)
+
+    indent_no = Column(Integer)  # Rows of one indent share this, within a list
+    part_no = Column(Integer)
+    sr_no = Column(String)
+    dvsn = Column(String)
+    sttn_from = Column(String, index=True)
+    demand_no = Column(String)
+    demand_date_text = Column(String)
+    demand_date = Column(Date)
+    demand_time = Column(String)
+    expd_ldng_date = Column(String)
+    cnsr = Column(String)
+    cnsg = Column(String)
+    grup_cmdt = Column(String)
+    rake_cmdt = Column(String)
+    tt = Column(String)
+    pc = Column(String)
+    pbf = Column(String)
+    via = Column(String)
+    sttn_to = Column(String)
+    indented_type = Column(String)
+    indented_units = Column(Integer)
+    indented_8w = Column(String)
+    ostg_units = Column(Integer)
+    ostg_8w = Column(String)
+    supplied_units = Column(Integer)
+    supplied_time = Column(String)
+    demand_id = Column(String)
 
 class RailDistance(Base):
     """Goods distance from a station to a plant yard, looked up once on the Railways' RBS site by
@@ -700,6 +738,39 @@ def import_inbound():
         missing_stations=missing_names,
     )
 
+def save_odr(columns, rows):
+    """Store an ODR table as the latest list of pending indents. Returns (rows stored, indents).
+    Raises ValueError if the table can't be read."""
+    records = indent_rules.read_odr_rows(columns, rows)
+    if not records:
+        raise ValueError("the table has no usable rows")
+
+    imported_at = datetime.now(IST).replace(tzinfo=None)
+    session = SessionDB()
+    try:
+        session.add_all(OdrIndent(imported_at=imported_at, **record) for record in records)
+        session.commit()
+    finally:
+        session.close()
+    return len(records), len({record["indent_no"] for record in records})
+
+@app.route("/api/odr", methods=["POST"])
+def import_odr():
+    """Save an ODR Wise Rake Outstanding Details table as the latest list of pending indents."""
+    data, error = read_import_request()
+    if error:
+        return error
+
+    columns = data["columns"]
+    rows = data["rows"]
+    if not isinstance(columns, list) or not isinstance(rows, list):
+        return jsonify(error="Expected JSON with columns and rows"), 400
+    try:
+        inserted, indent_count = save_odr(columns, rows)
+    except ValueError as e:
+        return jsonify(error=f"Could not read the table: {e}"), 400
+    return jsonify(received=len(rows), inserted=inserted, indents=indent_count)
+
 @app.route("/api/distances", methods=["POST"])
 def import_distances():
     """Save distances the extension looked up: {"distances": [{"from", "to", "km"}, ...]}.
@@ -894,13 +965,10 @@ def party_report(rakes, key, other):
     rows.sort(key=lambda row: (-row["total"], row["code"]))
     return rows
 
-def shared_source_report(session, latest_at):
-    """For each source station that loaded a rake for SAIL in the last SHARED_SOURCE_DAYS days, the rakes it
-    loaded for SAIL and for other consignees, in all and on each loading date (the date in LDNG TIME).
-    There is a row per commodity and source, covering every commodity such a source loaded. Every list sent in that time counts, so rakes already
-    delivered still count; a rake in several lists is counted once, by Rake ID and loading time."""
-    end = latest_at.date()
-    start = end - timedelta(days=SHARED_SOURCE_DAYS - 1)
+def loadings_in_window(session, start, end):
+    """({(rake id or load name, loading time, source): (consignee, commodity name)}, time of the first
+    list), for rakes loaded from start to end (dates), from every In-Bound list sent since start. A rake
+    in several lists is there once."""
     rows = (
         session.query(InboundRake.rake_id, InboundRake.load_name, InboundRake.sttn_from,
                       InboundRake.cnsg, InboundRake.cmdt, InboundRake.ldng_time, InboundRake.imported_at)
@@ -917,6 +985,16 @@ def shared_source_report(session, latest_at):
             continue
         key = ((rake_id or "").strip() or (load_name or "").strip(), loaded, source)
         loadings[key] = (cnsg, commodity_name(cmdt))
+    return loadings, first_list
+
+def shared_source_report(session, latest_at):
+    """For each source station that loaded a rake for SAIL in the last SHARED_SOURCE_DAYS days, the rakes it
+    loaded for SAIL and for other consignees, in all and on each loading date (the date in LDNG TIME).
+    There is a row per commodity and source, covering every commodity such a source loaded. Every list sent in that time counts, so rakes already
+    delivered still count; a rake in several lists is counted once, by Rake ID and loading time."""
+    end = latest_at.date()
+    start = end - timedelta(days=SHARED_SOURCE_DAYS - 1)
+    loadings, first_list = loadings_in_window(session, start, end)
 
     dates = [start + timedelta(days=n) for n in range(SHARED_SOURCE_DAYS)]
     sail_sources = {source for (_, _, source), (cnsg, _) in loadings.items() if is_sail(cnsg)}
@@ -1332,6 +1410,148 @@ def inbound_extension():
         as_attachment=True,
         download_name="rakes_received_extension.zip",
     )
+
+# ------------------ PENDING INDENTS (ODR) ------------------
+
+INDENT_PARTIES = ("sail", "others", "all")  # The party filter of the page's full list
+RECEIVED_AVERAGE_DAYS = 30
+
+def loaded_by_source(session, end):
+    """{(source code, commodity name): {"sail": rakes, "others": rakes}} loaded in the SHARED_SOURCE_DAYS
+    days up to end, or None when no In-Bound list was sent in that time."""
+    start = end - timedelta(days=SHARED_SOURCE_DAYS - 1)
+    loadings, first_list = loadings_in_window(session, start, end)
+    if not first_list:
+        return None
+    counts = {}
+    for (_, _, source), (cnsg, commodity) in loadings.items():
+        line = counts.setdefault((source, commodity), {"sail": 0, "others": 0})
+        line["sail" if is_sail(cnsg) else "others"] += 1
+    return counts
+
+def transit_by_destination(session):
+    """{(commodity name, plant or agent): loaded rakes on the way}, from the latest In-Bound list."""
+    imported_at = session.query(func.max(InboundRake.imported_at)).scalar()
+    counts = Counter()
+    if not imported_at:
+        return counts
+    rows = session.query(InboundRake.cmdt, InboundRake.sttn_to, InboundRake.loaded_empty).filter(
+        InboundRake.imported_at == imported_at,
+        func.upper(func.trim(InboundRake.sttn_to)).in_(list(INBOUND_DESTINATIONS)),
+    ).all()
+    for cmdt, yard, loaded_empty in rows:
+        if (loaded_empty or "").strip().upper() != "E":
+            counts[(commodity_name(cmdt), INBOUND_DESTINATIONS[yard.strip().upper()])] += 1
+    return counts
+
+def received_by_plant(session, end):
+    """{(commodity name, plant): {"per_day": rakes received a day over the RECEIVED_AVERAGE_DAYS days
+    before end, "yesterday": rakes received the day before end}}."""
+    start = datetime.combine(end - timedelta(days=RECEIVED_AVERAGE_DAYS), datetime.min.time())
+    yesterday = end - timedelta(days=1)
+    rows = session.query(Rake.cmdt, Rake.sttn_to, Rake.received_time).filter(
+        Rake.received_time >= start, Rake.received_time < datetime.combine(end, datetime.min.time()),
+    ).all()
+    totals = {}
+    for cmdt, plant, received_time in rows:
+        line = totals.setdefault((commodity_name(cmdt), (plant or "").strip().upper()), [0, 0])
+        line[0] += 1
+        line[1] += received_time.date() == yesterday
+    return {
+        key: {"per_day": round(total / RECEIVED_AVERAGE_DAYS, 1), "yesterday": on_yesterday}
+        for key, (total, on_yesterday) in totals.items()
+    }
+
+def stored_odr_row(row):
+    """An OdrIndent as read_odr_rows gives it: blanks as empty text, units as whole numbers."""
+    record = {}
+    for column in OdrIndent.__table__.columns:
+        value = getattr(row, column.name)
+        if value is None and column.name != "demand_date":
+            value = 0 if isinstance(column.type, Integer) else ""
+        record[column.name] = value
+    return record
+
+def indents_data(party="sail"):
+    """The latest ODR list for the Pending Indents page and its reports. party chooses whose indents
+    the full list shows: sail, others or all."""
+    party = party if party in INDENT_PARTIES else "sail"
+    session = SessionDB()
+    try:
+        imported_at = session.query(func.max(OdrIndent.imported_at)).scalar()
+        if not imported_at:
+            return {"imported_at": None, "party": party}
+        stored = session.query(OdrIndent).filter(OdrIndent.imported_at == imported_at).order_by(OdrIndent.id).all()
+        list_date = imported_at.date()
+        loaded = loaded_by_source(session, list_date)
+        in_transit = transit_by_destination(session)
+        received = received_by_plant(session, list_date)
+        rows = [stored_odr_row(row) for row in stored]
+    finally:
+        session.close()
+
+    all_indents = indent_rules.build_indents(rows, list_date, set(DESTINATION_PLANTS))
+    plant_of = dict(sorted(INBOUND_DESTINATIONS.items(), key=lambda item: plant_sort_key(item[0])))
+    shown = [
+        {**indent, "source_label": station_label(indent["source"]), "commodity": commodity_name(indent["cmdt"])}
+        for indent in all_indents
+        if indent["status"] != "done"
+        and (party == "all" or indent["sail"] == (party == "sail"))
+    ]
+    shown.sort(key=lambda indent: -(indent["age"] if indent["age"] is not None else -1))
+    return {
+        "imported_at": imported_at,
+        "party": party,
+        "summary": indent_rules.summary(all_indents),
+        "sources": indent_rules.source_report(all_indents, loaded, commodity_name, station_label),
+        "plants": indent_rules.plant_pipeline(all_indents, in_transit, received, commodity_name, plant_of),
+        "steel": indent_rules.steel_report(all_indents, station_label),
+        "buckets": indent_rules.BUCKETS,
+        "loaded_days": SHARED_SOURCE_DAYS,
+        "received_days": RECEIVED_AVERAGE_DAYS,
+        "all": shown,
+    }
+
+@app.route("/indents", methods=["GET", "POST"])
+def pending_indents():
+    """Show the latest ODR list of pending indents; a POST loads a downloaded ODR CSV file."""
+    if request.method == "POST":
+        file = request.files.get("file")
+        if not file or not file.filename.lower().endswith(".csv"):
+            return redirect(url_for("pending_indents", msg="Choose the ODR CSV file downloaded from FOIS."))
+        try:
+            table = pd.read_csv(file.stream, dtype=str, keep_default_na=False)
+            inserted, indent_count = save_odr(list(table.columns), table.values.tolist())
+            msg = f"Loaded {indent_count} indents. This is now the latest ODR list."
+        except (ValueError, pd.errors.ParserError, UnicodeDecodeError) as e:
+            msg = f"Could not read the file: {e}"
+        return redirect(url_for("pending_indents", msg=msg))
+
+    return render_template(
+        "indents.html", msg=request.args.get("msg", ""), **indents_data(request.args.get("party", "sail"))
+    )
+
+def indents_download(build, extension, mimetype):
+    """Send the latest pending-indents report as a file."""
+    data = indents_data()
+    if not data["imported_at"]:
+        return "No ODR list has been received yet.", 404
+    return send_file(
+        io.BytesIO(build(data)),
+        mimetype=mimetype,
+        as_attachment=True,
+        download_name="pending_indents_" + data["imported_at"].strftime("%Y%m%d_%H%M") + extension,
+    )
+
+@app.route("/indents/report.xlsx")
+def indents_excel():
+    return indents_download(
+        indent_exports.build_excel, ".xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+
+@app.route("/indents/report.pdf")
+def indents_pdf():
+    return indents_download(indent_exports.build_pdf, ".pdf", "application/pdf")
 
 @app.route("/upload", methods=["GET", "POST"])
 def upload():

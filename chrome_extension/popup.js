@@ -1,6 +1,7 @@
 const REPORTS = {
   received: { label: "Rakes Received", url: "http://127.0.0.1:5000/api/rakes" },
   inbound: { label: "Loaded In-Bound", url: "http://127.0.0.1:5000/api/inbound" },
+  odr: { label: "ODR Rake Outstanding", url: "http://127.0.0.1:5000/api/odr" },
 };
 const AUTO_ALARM = "autoSendInbound"; // The alarm background.js sets
 
@@ -63,7 +64,7 @@ async function findTable() {
   const headings = results.flatMap((result) => result.headings).slice(0, 3).join(" | ");
   showStatus(
     `No rake table found (checked ${tableCount} tables). ` +
-      "Open the Rakes Received or Loaded In-Bound report on FOIS first." +
+      "Open the Rakes Received, Loaded In-Bound or ODR Wise Rake Outstanding Details report on FOIS first." +
       (headings ? ` Headings seen: ${headings}` : ""),
     "error",
   );
@@ -98,6 +99,8 @@ async function send() {
         await chrome.storage.local.set({ pendingDistances, pendingStations });
         await chrome.tabs.create({ url: "lookup.html" });
       }
+    } else if (table.report === "odr") {
+      showStatus(`Sent ${result.indents} indents. This is now the latest ODR list.`, "success");
     } else {
       const unusable = result.received - result.inserted - result.skipped;
       showStatus(

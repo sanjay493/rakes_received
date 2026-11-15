@@ -9,6 +9,9 @@ function extractRakeTable() {
       "sttn_from", "sttn_to", "cmdt", "totl_unts", "rake_type",
     ],
     inbound: ["crnt_locn", "stts_time", "sttn_from", "sttn_to", "rake_id", "expd_arvltime"],
+    // ODR Wise Rake Outstanding Details. A row with a blank SR.NO. is a further part of the indent
+    // above it, and is sent like any other row.
+    odr: ["sr_no", "sttn_from", "demand_no", "demand_date", "cnsg", "indented_units", "ostg_units", "demand_id"],
   };
 
   const cellText = (cell) => {

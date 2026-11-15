@@ -1,0 +1,229 @@
+{% extends "base.html" %}
+
+{% macro dash(value) %}{{ '—' if value is none else value }}{% endmacro %}
+{% macro count(value) %}{{ value if value else '' }}{% endmacro %}
+
+{% macro upload_form() %}
+<form method="post" enctype="multipart/form-data" class="in-upload">
+    <input type="file" name="file" accept=".csv" required>
+    <button type="submit" class="btn-primary">Load ODR CSV</button>
+</form>
+{% endmacro %}
+
+{% block content %}
+<style>
+    .in-figures { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 12px; }
+    .in-figure { background: #e8eef5; border-radius: 6px; padding: 10px 16px; min-width: 150px; }
+    .in-figure b { display: block; font-size: 24px; color: #1f3a5f; }
+    .in-figure span { font-size: 13px; color: #44546a; }
+    .in-box { overflow: auto; max-height: 75vh; border: 1px solid #e4e7eb; }
+    .in-table { border-collapse: separate; border-spacing: 0; width: 100%; font-size: 14px; }
+    .in-table th, .in-table td { padding: 6px 8px; border-bottom: 1px solid #e4e7eb; text-align: left; vertical-align: top; }
+    .in-table thead th { position: sticky; top: 0; background: #1f3a5f; color: white; white-space: nowrap; }
+    .in-table .num { text-align: right; white-space: nowrap; }
+    .in-table tr.in-flag td, .in-table tr.in-flag th { background: #fde8e6; }
+    .in-table tr.in-start td, .in-table tr.in-start th { border-top: 2px solid #1f3a5f; }
+    .in-old { color: #b3261e; font-weight: bold; }
+    .in-note { font-size: 13px; color: #44546a; margin-top: 8px; }
+    .in-msg { background: #e7f4e8; border-left: 4px solid #2e7d32; padding: 10px 14px; margin-bottom: 16px; }
+    .in-upload { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-top: 10px; }
+    .in-chip { display: inline-block; background: #e8eef5; border-radius: 10px; padding: 1px 8px; margin: 1px 2px 1px 0; white-space: nowrap; }
+</style>
+
+{% if msg %}<div class="in-msg">{{ msg }}</div>{% endif %}
+
+{% if not imported_at %}
+<div class="card">
+    <h2>Pending Indents</h2>
+    <p>No ODR list has been received yet. Open "ODR Wise Rake Outstanding Details" on FOIS and click Send in
+        the extension, or load the CSV file downloaded from that page.</p>
+    {{ upload_form() }}
+</div>
+{% else %}
+
+<div class="card">
+    <h2>Pending Indents</h2>
+    <p>ODR list of {{ imported_at.strftime('%d-%m-%Y %H:%M') }}. An indent is pending when no rake has been
+        supplied for it and at least half its wagons are still outstanding.</p>
+    <div class="in-figures">
+        <div class="in-figure"><b>{{ summary.inward_pending }}</b><span>SAIL rakes pending, raw material</span></div>
+        <div class="in-figure"><b>{{ summary.steel_pending }}</b><span>SAIL rakes pending, steel going out</span></div>
+        <div class="in-figure"><b>{{ summary.supplied }}</b><span>Supplied, under loading</span></div>
+        <div class="in-figure"><b>{{ summary.part }}</b><span>Part supplied</span></div>
+        <div class="in-figure">
+            {% if summary.oldest %}
+            <b>{{ summary.oldest.age }} days</b><span>Oldest pending: {{ summary.oldest.source }}, {{ summary.oldest.demand_date.strftime('%d-%m-%Y') }}</span>
+            {% else %}
+            <b>—</b><span>Oldest pending</span>
+            {% endif %}
+        </div>
+        <div class="in-figure"><b>{{ summary.others_pending }}</b><span>Other parties' pending indents</span></div>
+    </div>
+    <div class="in-upload">
+        <a class="btn-primary" style="text-decoration: none; text-align: center;" href="/indents/report.xlsx">Download Excel</a>
+        <a class="btn-primary" style="text-decoration: none; text-align: center;" href="/indents/report.pdf">Download PDF</a>
+    </div>
+</div>
+
+<div class="card">
+    <h3>Pending at each source</h3>
+    <div class="in-box">
+    <table class="in-table">
+        <thead>
+            <tr>
+                <th>Commodity</th>
+                <th>Source</th>
+                <th>Wagon</th>
+                <th class="num">SAIL pending</th>
+                {% for bucket in buckets %}<th class="num">{{ bucket }} days</th>{% endfor %}
+                <th class="num">Oldest (days)</th>
+                <th class="num">Supplied</th>
+                <th class="num">Part supplied</th>
+                <th>Others pending</th>
+                <th class="num">Loaded in {{ loaded_days }} days: SAIL</th>
+                <th class="num">Others</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in sources %}
+            <tr class="{% if row.flag %}in-flag{% endif %}{% if loop.first or loop.previtem.commodity != row.commodity %} in-start{% endif %}">
+                <td>{{ row.commodity }}</td>
+                <th scope="row">{{ row.source }}</th>
+                <td>{{ row.wagon_types | join(', ') }}</td>
+                <td class="num"><b>{{ row.pending }}</b></td>
+                {% for bucket in buckets %}<td class="num">{{ count(row.buckets[bucket]) }}</td>{% endfor %}
+                <td class="num{% if row.oldest is not none and row.oldest > 7 %} in-old{% endif %}">{{ dash(row.oldest) }}</td>
+                <td class="num">{{ count(row.supplied) }}</td>
+                <td class="num">{{ count(row.part) }}</td>
+                <td>{% for party, pending in row.others %}<span class="in-chip">{{ party }} <b>{{ pending }}</b></span>{% else %}—{% endfor %}</td>
+                <td class="num">{{ dash(row.loaded_sail) }}</td>
+                <td class="num">{{ dash(row.loaded_others) }}</td>
+            </tr>
+            {% else %}
+            <tr><td colspan="{{ 10 + buckets | length }}">No SAIL indents for raw material in this list.</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    <p class="in-note">A shaded row is a source where a SAIL indent has waited over 7 days while rakes were loaded
+        there for other parties in the last {{ loaded_days }} days. Loaded rakes come from the All-India In-Bound
+        lists; a dash means no such list was sent in those days.</p>
+</div>
+
+<div class="card">
+    <h3>Pipeline to each plant</h3>
+    <div class="in-box">
+    <table class="in-table">
+        <thead>
+            <tr>
+                <th>Plant</th>
+                <th>Commodity</th>
+                <th class="num">Pending indents</th>
+                <th class="num">In transit</th>
+                <th class="num">Received per day ({{ received_days }} days)</th>
+                <th class="num">Received yesterday</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in plants %}
+            <tr{% if loop.first or loop.previtem.plant != row.plant %} class="in-start"{% endif %}>
+                <th scope="row">{{ row.plant }}</th>
+                <td>{{ row.commodity }}</td>
+                <td class="num"><b>{{ count(row.pending) }}</b></td>
+                <td class="num">{{ count(row.in_transit) }}</td>
+                <td class="num">{{ dash(row.per_day) }}</td>
+                <td class="num">{{ dash(row.yesterday) }}</td>
+            </tr>
+            {% else %}
+            <tr><td colspan="6">Nothing pending, in transit or received for the plants.</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    <p class="in-note">A two-point indent counts for its first destination. In transit is from the latest In-Bound list.</p>
+</div>
+
+<div class="card">
+    <h3>Steel indents at each plant</h3>
+    <div class="in-box">
+    <table class="in-table">
+        <thead>
+            <tr>
+                <th>Plant</th>
+                <th>Wagon</th>
+                <th class="num">Pending</th>
+                {% for bucket in buckets %}<th class="num">{{ bucket }} days</th>{% endfor %}
+                <th class="num">Oldest (days)</th>
+                <th class="num">Supplied</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in steel %}
+            <tr{% if loop.first or loop.previtem.plant != row.plant %} class="in-start"{% endif %}>
+                <th scope="row">{{ row.plant }}</th>
+                <td>{{ row.wagon }}</td>
+                <td class="num"><b>{{ row.pending }}</b></td>
+                {% for bucket in buckets %}<td class="num">{{ count(row.buckets[bucket]) }}</td>{% endfor %}
+                <td class="num{% if row.oldest is not none and row.oldest > 7 %} in-old{% endif %}">{{ dash(row.oldest) }}</td>
+                <td class="num">{{ count(row.supplied) }}</td>
+            </tr>
+            {% else %}
+            <tr><td colspan="{{ 5 + buckets | length }}">No SAIL steel indents in this list.</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    </div>
+</div>
+
+<div class="card">
+    <h3>All pending indents</h3>
+    <div class="unit-buttons" style="margin-bottom: 12px;">
+        <a class="unit-btn {% if party == 'sail' %}active{% endif %}" href="{{ url_for('pending_indents') }}">SAIL</a>
+        <a class="unit-btn {% if party == 'others' %}active{% endif %}" href="{{ url_for('pending_indents', party='others') }}">Others</a>
+        <a class="unit-btn {% if party == 'all' %}active{% endif %}" href="{{ url_for('pending_indents', party='all') }}">All</a>
+    </div>
+    <div class="in-box">
+    <table class="in-table">
+        <thead>
+            <tr>
+                <th>Source</th>
+                <th>Party</th>
+                <th>Commodity</th>
+                <th>To</th>
+                <th>Wagon</th>
+                <th class="num">Indented</th>
+                <th class="num">Outstanding</th>
+                <th>Demand date</th>
+                <th class="num">Age (days)</th>
+                <th>Status</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for indent in all %}
+            <tr>
+                <th scope="row">{{ indent.source_label }}</th>
+                <td>{{ indent.cnsg or '—' }}</td>
+                <td>{{ indent.commodity }}</td>
+                <td>{{ indent.destinations | join(', ') }}</td>
+                <td>{{ indent.wagon_types | join(' + ') }}</td>
+                <td class="num">{{ indent.indented }}</td>
+                <td class="num">{{ indent.outstanding }}</td>
+                <td>{{ indent.demand_date.strftime('%d-%m-%Y') if indent.demand_date else '—' }}</td>
+                <td class="num{% if indent.age is not none and indent.age > 7 %} in-old{% endif %}">{{ dash(indent.age) }}</td>
+                <td>{{ {'pending': 'Pending', 'supplied': 'Supplied, under loading', 'part': 'Part supplied'}[indent.status] }}</td>
+            </tr>
+            {% else %}
+            <tr><td colspan="10">No indents to show.</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    </div>
+</div>
+
+<div class="card">
+    <h3>Load an ODR file</h3>
+    <p>The extension sends the ODR list from the open FOIS page. A CSV file downloaded from that page can be loaded here instead.</p>
+    {{ upload_form() }}
+</div>
+{% endif %}
+{% endblock %}
