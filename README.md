@@ -14,13 +14,19 @@ python app.py
 
 Then open http://localhost:5000. Local runs need no password unless you set `APP_PASSWORD`.
 
-To let the Chrome extension send data to a local run, start the app with an API token (PowerShell):
+To let the Chrome extension send data to a local run, put the token in a `.env` file next to `app.py` (copy `.env.example`; `.env` is ignored by git):
 
 ```
-$env:API_TOKEN = "<your token>"
-$env:PYTHONUTF8 = "1"
-.\venv\Scripts\python.exe app.py
+API_TOKEN=<your token>
 ```
+
+Then start the app as usual:
+
+```
+.env\Scripts\python.exe app.py
+```
+
+Variables set in the real environment take priority over `.env`. If the app prints Unicode errors on Windows, also run `$env:PYTHONUTF8 = "1"` first.
 
 The token can be any text you choose; enter the same one in the extension popup. The extension in this repo sends to `http://127.0.0.1:5000`.
 

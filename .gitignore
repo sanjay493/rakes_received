@@ -6,3 +6,6 @@ rake_data.db
 rake_data_before_restore.db
 
 __pycache__/
+
+# Local secrets (API_TOKEN etc.)
+.env

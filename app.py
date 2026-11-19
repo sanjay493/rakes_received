@@ -25,6 +25,30 @@ app = Flask(__name__)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
+def _load_env_file(path):
+    """Read KEY=VALUE lines from a .env file into os.environ.
+
+    Variables already set in the real environment win, so hosts like Fly.io
+    that inject settings are never overridden by a stray file.
+    """
+    try:
+        with open(path, encoding="utf-8-sig") as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, value = line.split("=", 1)
+                key = key.strip().removeprefix("export ").strip()
+                value = value.strip()
+                if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+                    value = value[1:-1]
+                if key:
+                    os.environ.setdefault(key, value)
+    except FileNotFoundError:
+        pass
+
+_load_env_file(os.path.join(BASE_DIR, ".env"))
+
 # Everything the app writes lives in DATA_DIR. In the cloud, point it at a
 # persistent volume; container filesystems are wiped on every redeploy.
 DATA_DIR = os.path.abspath(os.environ.get("DATA_DIR", BASE_DIR))
