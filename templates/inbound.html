@@ -29,6 +29,8 @@
 {% endmacro %}
 
 {% block content %}
+{# SAIL only is the default, so only "all consignees" needs saying in the links. #}
+{% set cnsg_arg = None if cnsg else 'ALL' %}
 <style>
     .sticky-table thead th { position: sticky; top: 0; z-index: 2; background: #1f3a5f; }
     .sticky-table tbody td, .sticky-table tbody th { border-bottom: 1px solid #e4e7eb; }
@@ -82,25 +84,36 @@
     .tm-grand-total .tm-st { color: #ffb4ab; }
     .tm-grand-total .tm-chip { color: #1f3a5f; }
     .tm-grand-total .tm-chip .tm-st { color: #b42318; }
+    .filter-label { margin-top: 15px; font-size: 13px; font-weight: bold; color: #52606d; }
+    .filter-label + .unit-buttons { margin-top: 6px; }
 </style>
 
 <div class="card">
     <h2 style="margin-top: 0;">Loaded In-Bound Rakes</h2>
     {% if imported_at %}
     <p style="margin-bottom: 0;">
-        {{ total }} rakes to the plants and pellet agents in the list sent from FOIS on {{ imported_at.strftime('%d-%m-%Y %H:%M') }} IST.
+        {{ total }} {% if cnsg %}{{ cnsg }} {% endif %}rakes to the plants and pellet agents in the list sent from FOIS on {{ imported_at.strftime('%d-%m-%Y %H:%M') }} IST.
         {% if stabled_count %}<strong style="color: #b42318;">{{ stabled_count }} stabled{% if destination %} to {{ destination }}{% endif %} (status ST).</strong>{% endif %}
     </p>
     <div style="display: flex; gap: 10px; flex-wrap: wrap; margin-top: 15px;">
-        <a class="btn-primary" style="text-decoration: none; text-align: center;" href="{{ url_for('inbound_excel', sttn_to=destination or None) }}">Download Excel</a>
-        <a class="btn-primary" style="text-decoration: none; text-align: center;" href="{{ url_for('inbound_pdf', sttn_to=destination or None) }}">Download PDF</a>
+        <a class="btn-primary" style="text-decoration: none; text-align: center;" href="{{ url_for('inbound_excel', sttn_to=destination or None, cnsg=cnsg_arg) }}">Download Excel</a>
+        <a class="btn-primary" style="text-decoration: none; text-align: center;" href="{{ url_for('inbound_pdf', sttn_to=destination or None, cnsg=cnsg_arg) }}">Download PDF</a>
     </div>
+    <div class="filter-label">Consignee (CNSG)</div>
     <div class="unit-buttons">
-        <a class="unit-btn {% if not destination %}active{% endif %}" href="{{ url_for('inbound') }}">All ({{ total }})</a>
+        <a class="unit-btn {% if cnsg %}active{% endif %}" href="{{ url_for('inbound', sttn_to=destination or None) }}">SAIL only ({{ sail_count }})</a>
+        <a class="unit-btn {% if not cnsg %}active{% endif %}" href="{{ url_for('inbound', sttn_to=destination or None, cnsg='ALL') }}">All consignees ({{ all_consignees_count }})</a>
+    </div>
+    <div class="filter-label">Destination</div>
+    <div class="unit-buttons">
+        <a class="unit-btn {% if not destination %}active{% endif %}" href="{{ url_for('inbound', cnsg=cnsg_arg) }}">All ({{ total }})</a>
         {% for sttn_to, count in counts %}
-        <a class="unit-btn {% if destination == sttn_to %}active{% endif %}" href="{{ url_for('inbound', sttn_to=sttn_to) }}">{{ sttn_to or '—' }} ({{ count }})</a>
+        <a class="unit-btn {% if destination == sttn_to %}active{% endif %}" href="{{ url_for('inbound', sttn_to=sttn_to, cnsg=cnsg_arg) }}">{{ sttn_to or '—' }} ({{ count }})</a>
         {% endfor %}
     </div>
+    {% if cnsg and not rakes %}
+    <p style="margin-bottom: 0;">No {{ cnsg }} rakes{% if destination %} to {{ destination }}{% endif %} in this list.</p>
+    {% endif %}
     {% else %}
     <p style="margin-bottom: 0;">
         No list has been received yet. Open the Loaded In-Bound report on FOIS and send it with the Chrome extension.
@@ -131,7 +144,7 @@
 
 {% if rakes %}
 <div class="card">
-    <h3 style="margin-top: 0; margin-bottom: 4px;">Rakes in Transit{% if destination %} to {{ destination }}{% endif %}</h3>
+    <h3 style="margin-top: 0; margin-bottom: 4px;">{% if cnsg %}{{ cnsg }} {% endif %}Rakes in Transit{% if destination %} to {{ destination }}{% endif %}</h3>
     <p style="margin: 0 0 12px; color: #52606d;">As on {{ imported_at.strftime('%d-%m-%Y %H:%M') }} IST, when the data was received from FOIS</p>
     {% if report.rows %}
     <div class="transit-desktop">

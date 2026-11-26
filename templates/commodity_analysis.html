@@ -381,12 +381,14 @@
                         
                         <!-- Outliers Link -->
                         <td style="padding: 10px 4px; text-align: center; border-left: 2px solid #dee2e6; background: rgba(251, 233, 231, 0.4);">
-                            <a href="/source_outliers/{{ item.source }}?commodity={{ item.commodity }}&destination={{ item.destination }}" 
+                            {% if item.source_code %}
+                            <a href="/source_outliers/{{ item.source_code }}?commodity={{ item.commodity|urlencode }}&destination={{ item.destination|urlencode }}"
                                style="color: #d84315; text-decoration: none; font-weight: bold; padding: 4px 8px; background: white; border: 1px solid #d84315; border-radius: 4px; display: inline-block; transition: all 0.2s; font-size: 10px;"
                                onmouseover="this.style.background='#d84315'; this.style.color='white';"
                                onmouseout="this.style.background='white'; this.style.color='#d84315';">
                                 View ⚠️
                             </a>
+                            {% endif %}
                         </td>
                     </tr>
                     {% endfor %}

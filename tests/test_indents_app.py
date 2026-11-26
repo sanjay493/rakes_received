@@ -1,12 +1,6 @@
 """The ODR import and the Pending Indents page, against a copy of the database in a temporary folder."""
 import io
 import os
-import tempfile
-
-# The app opens its database when it is imported, so point it at a temporary folder first.
-os.environ["DATA_DIR"] = tempfile.mkdtemp()
-os.environ["API_TOKEN"] = "test-token"
-os.environ.pop("APP_PASSWORD", None)
 
 import pytest
 from openpyxl import load_workbook

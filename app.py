@@ -3,6 +3,7 @@ import pandas as pd
 import plotly.graph_objs as go
 import hmac, math, os, io, re, shutil, zipfile
 from collections import Counter
+from itertools import zip_longest
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import create_engine, func, text, Column, Integer, String, Float, Date, DateTime, UniqueConstraint
@@ -16,6 +17,7 @@ from inbound_exports import build_excel, build_pdf
 import commodity_exports
 import indent_exports
 import indents as indent_rules
+import raw_materials as raw_rules
 
 # ------------------ APP SETUP ------------------
 
@@ -190,6 +192,22 @@ class OdrIndent(Base):
     supplied_time = Column(String)
     demand_id = Column(String)
 
+class RakeSubCommodity(Base):
+    """A sub-commodity typed in on the Raw Material Status page: one line of one loaded trip, which is
+    identified by Rake ID, source and loading time. A mixed rake has one line per sub-commodity."""
+    __tablename__ = "rake_sub_commodities"
+
+    id = Column(Integer, primary_key=True)
+    rake_id = Column(String, index=True, nullable=False)
+    sttn_from = Column(String, nullable=False)
+    sttn_to = Column(String, nullable=False)
+    ldng_time = Column(String, nullable=False)
+    line_no = Column(Integer, nullable=False)
+    section = Column(String, nullable=False)
+    sub_commodity = Column(String, nullable=False)
+    wagons = Column(Integer, nullable=False)
+    entered_at = Column(DateTime, nullable=False)
+
 class RailDistance(Base):
     """Goods distance from a station to a plant yard, looked up once on the Railways' RBS site by
     the Chrome extension. km is empty when RBS doesn't know the station."""
@@ -341,10 +359,13 @@ def missing_distance_pairs(rakes, session):
 
 def missing_station_codes(rakes, session):
     """Codes with no name in the station mappings that have never been looked up on FOIS: the source and
-    destination of rakes to the plants or agents, and the source of any rake for consignee SAIL."""
+    destination of these rakes to the plants or agents, the source of any of them for consignee SAIL, the
+    current location of those on the Raw Material Status page, and the source of every received rake."""
     looked_up = {code for (code,) in session.query(StationLookup.code).all()}
-    codes = set()
+    codes = set(filter(None, (station_code(source) for (source,) in session.query(Rake.sttn_from).distinct())))
     for rake in rakes:
+        if raw_material_section(rake) and station_code(rake.crnt_locn):
+            codes.add(station_code(rake.crnt_locn))
         if station_code(rake.sttn_to) in INBOUND_DESTINATIONS:
             codes.update(filter(None, (station_code(rake.sttn_from), station_code(rake.sttn_to))))
         elif is_sail(rake.cnsg) and station_code(rake.sttn_from):
@@ -372,6 +393,15 @@ def commodity_name(code):
     """The readable name from the commodity mappings, or the code if there isn't one."""
     code = (code or "").strip().upper()
     return commodity_mappings.get(code, code) or "—"
+
+def raw_material_section(rake):
+    """The Raw Material Status section of a loaded consignee SAIL rake to one of the plants, or None."""
+    # str(): a list being imported may hold values that aren't text yet.
+    if not is_sail(rake.cnsg) or str(rake.sttn_to or "").strip().upper() not in DESTINATION_PLANTS:
+        return None
+    if str(rake.loaded_empty or "").strip().upper() == "E":
+        return None
+    return raw_rules.section_of(commodity_name(str(rake.cmdt or "")))
 
 def is_stabled(rake):
     return (rake.stts_code or "").strip().upper() == STABLED_STATUS
@@ -669,7 +699,7 @@ def fallback_insert(session, records):
 #         "rake_type": r.rake_type
 #     } for r in rows])
 
-def query_to_df(rows):
+def query_to_df(rows, source_name=get_station_display_name):
     # Explicit columns so an empty result (no rakes in the date range) still has them.
     columns = ["received_time", "transit_time_hrs", "sttn_from", "sttn_to", "commodity", "rake_type"]
     df = pd.DataFrame([{
@@ -682,7 +712,7 @@ def query_to_df(rows):
     } for r in rows], columns=columns)
 
     # map codes → readable names once
-    df["sttn_from"] = df["sttn_from"].apply(get_station_display_name)
+    df["sttn_from"] = df["sttn_from"].apply(source_name)
     # df["sttn_to"]   = df["sttn_to"].apply(get_station_display_name)
     # df["commodity"] = df["commodity"].apply(get_commodity_display_name)
 
@@ -721,6 +751,22 @@ def import_rakes():
     inserted, skipped = insert_cleaned_data(df_clean)
     return jsonify(received=len(df_raw), inserted=inserted, skipped=skipped)
 
+def carry_sub_commodities(records, session):
+    """Move saved sub-commodity entries to their rake's new loading time, where FOIS revised it before the
+    rake departed. records are the new list's rakes, not yet saved."""
+    saved = session.query(RakeSubCommodity).all()
+    if not saved:
+        return
+    previous_at = session.query(func.max(InboundRake.imported_at)).scalar()
+    previous = session.query(InboundRake).filter(InboundRake.imported_at == previous_at).all()
+    moves = raw_rules.moved_entries(
+        {(line.rake_id, line.sttn_from, line.sttn_to, line.ldng_time) for line in saved}, previous, records)
+    taken = {(line.rake_id, line.sttn_from, line.ldng_time) for line in saved}
+    for line in saved:
+        new_time = moves.get((line.rake_id, line.sttn_from, line.ldng_time))
+        if new_time and (line.rake_id, line.sttn_from, new_time) not in taken:
+            line.ldng_time = new_time
+
 @app.route("/api/inbound", methods=["POST"])
 def import_inbound():
     """Save a Loaded In-Bound table as the latest list of rakes on the way."""
@@ -750,6 +796,7 @@ def import_inbound():
     try:
         missing = missing_distance_pairs(records, session)
         missing_names = missing_station_codes(records, session)
+        carry_sub_commodities(records, session)
         session.add_all(records)
         session.commit()
     finally:
@@ -949,13 +996,14 @@ def index():
 # ------------------ ALL-INDIA EN-ROUTE ------------------
 
 SAIL_CONSIGNEE = "SAIL"  # CNSG of rakes for SAIL, at the plants and at its stockyards
+ALL_CONSIGNEES = "ALL"  # ?cnsg= value that lifts the In-Bound page's default SAIL filter
 # In the In-Bound loading-date table, this commodity (its name in the commodity mappings) lists only
 # consignee SAIL's rakes, to every destination in the list.
 SAIL_ONLY_COMMODITY = "IRON ORE"
 SHARED_SOURCE_DAYS = 7
 
 def is_sail(cnsg):
-    return (cnsg or "").strip().upper() == SAIL_CONSIGNEE
+    return str(cnsg or "").strip().upper() == SAIL_CONSIGNEE
 
 def party(code):
     """A consigner or consignee code, with a dash for a blank one."""
@@ -1334,9 +1382,12 @@ def bobsnm1():
         default_days=RECEIVED_DEFAULT_DAYS,
     )
 
-def inbound_data(destination):
+def inbound_data(destination, cnsg=""):
     """Everything the In-Bound page and its downloads show: the latest list's rakes going to the
-    plants and pellet agents. Rakes to other destinations stay saved but aren't shown."""
+    plants and pellet agents. Rakes to other destinations stay saved but aren't shown.
+    Only consignee SAIL's rakes are kept, unless cnsg is ALL_CONSIGNEES."""
+    sail_only = cnsg.strip().upper() != ALL_CONSIGNEES
+    consignee_is_sail = func.upper(func.trim(func.coalesce(InboundRake.cnsg, ""))) == SAIL_CONSIGNEE
     session = SessionDB()
     try:
         imported_at = session.query(func.max(InboundRake.imported_at)).scalar()
@@ -1344,6 +1395,12 @@ def inbound_data(destination):
             InboundRake.imported_at == imported_at,
             func.upper(func.trim(InboundRake.sttn_to)).in_(list(INBOUND_DESTINATIONS)),
         )
+        # Rakes on each consignee button, within the chosen destination.
+        chosen = latest.filter(InboundRake.sttn_to == destination) if destination else latest
+        all_consignees_count = chosen.count()
+        sail_count = chosen.filter(consignee_is_sail).count()
+        if sail_only:
+            latest = latest.filter(consignee_is_sail)
         counts = sorted(
             latest.with_entities(InboundRake.sttn_to, func.count()).group_by(InboundRake.sttn_to).all(),
             key=lambda item: plant_sort_key(item[0]),
@@ -1357,7 +1414,7 @@ def inbound_data(destination):
             rake for rake in session.query(InboundRake).filter(
                 InboundRake.imported_at == imported_at,
                 not_plant_list(),
-                func.upper(func.trim(func.coalesce(InboundRake.cnsg, ""))) == SAIL_CONSIGNEE,
+                consignee_is_sail,
             ).order_by(InboundRake.id).all()
             if (rake.sttn_to or "").strip() and commodity_name(rake.cmdt) == SAIL_ONLY_COMMODITY
         ]
@@ -1387,21 +1444,29 @@ def inbound_data(destination):
         "counts": counts,
         "total": sum(count for _, count in counts),
         "destination": destination,
+        "cnsg": SAIL_CONSIGNEE if sail_only else "",
+        "all_consignees_count": all_consignees_count,
+        "sail_count": sail_count,
         "imported_at": imported_at,
     }
 
 @app.route("/inbound")
 def inbound():
     """Show the most recently imported Loaded In-Bound list."""
-    return render_template("inbound.html", **inbound_data(request.args.get("sttn_to", "")))
+    return render_template(
+        "inbound.html", **inbound_data(request.args.get("sttn_to", ""), request.args.get("cnsg", ""))
+    )
 
 def inbound_download(build, extension, mimetype):
-    """Send the latest In-Bound report as a file, following the page's destination filter."""
-    data = inbound_data(request.args.get("sttn_to", ""))
+    """Send the latest In-Bound report as a file, following the page's filters."""
+    data = inbound_data(request.args.get("sttn_to", ""), request.args.get("cnsg", ""))
     if not data["imported_at"]:
         return "No In-Bound list has been received yet.", 404
 
-    parts = ["inbound_report", station_code(data["destination"]), data["imported_at"].strftime("%Y%m%d_%H%M")]
+    parts = [
+        "inbound_report", station_code(data["destination"]), data["cnsg"],
+        data["imported_at"].strftime("%Y%m%d_%H%M"),
+    ]
     return send_file(
         io.BytesIO(build(data)),
         mimetype=mimetype,
@@ -1418,6 +1483,129 @@ def inbound_excel():
 @app.route("/inbound/report.pdf")
 def inbound_pdf():
     return inbound_download(build_pdf, ".pdf", "application/pdf")
+
+def latest_raw_material_rakes(session):
+    """(when the latest In-Bound list was received, its rakes shown on the Raw Material Status page)."""
+    imported_at = session.query(func.max(InboundRake.imported_at)).scalar()
+    rows = session.query(InboundRake).filter(
+        InboundRake.imported_at == imported_at,
+        func.upper(func.trim(InboundRake.sttn_to)).in_(list(DESTINATION_PLANTS)),
+    ).order_by(InboundRake.id).all()
+    return imported_at, [rake for rake in rows if raw_material_section(rake)]
+
+def rake_anchor(trip):
+    """The HTML id of a rake's row, from its trip key."""
+    return "rake-" + re.sub(r"[^A-Za-z0-9]+", "-", "-".join(trip))
+
+def raw_material_data(plant="", missing_only=False, keep=""):
+    """Everything the Raw Material Status page shows: the latest list's loaded ore and coal rakes with
+    their sub-commodities, plant by plant, and a summary. The summary follows the plant filter only.
+    keep is the anchor of a rake to list even when only those not entered are wanted."""
+    session = SessionDB()
+    try:
+        imported_at, rakes = latest_raw_material_rakes(session)
+        saved = session.query(RakeSubCommodity).order_by(RakeSubCommodity.line_no).all()
+        distances = {(d.from_code, d.to_code): d.km for d in session.query(RailDistance).all()}
+    finally:
+        session.close()
+
+    entries, suggestions = {}, {section: {} for section, _ in raw_rules.SECTIONS}
+    for line in saved:
+        trip = (line.rake_id, line.sttn_from, line.ldng_time)
+        entries.setdefault(trip, []).append((line.sub_commodity, line.wagons))
+        suggestions.setdefault(line.section, {})[line.sub_commodity.casefold()] = line.sub_commodity
+
+    for rake in rakes:
+        trip = raw_rules.trip_key(rake)
+        rake.plant = DESTINATION_PLANTS[rake.sttn_to.strip().upper()]
+        rake.section = raw_material_section(rake)
+        rake.wagons = raw_rules.wagon_count(rake.totl_unts)
+        rake.parts = entries.get(trip, []) if trip[0] else []
+        rake.check_wagons = bool(rake.parts) and rake.wagons is not None and sum(n for _, n in rake.parts) != rake.wagons
+        rake.can_enter = bool(trip[0])
+        rake.anchor = rake_anchor(trip)
+        rake.distance_km = distance_left_km(rake, distances)
+        rake.source = station_label((rake.sttn_from or "").strip().upper())
+        rake.siding = rake.sttn_to.strip().upper() if (rake.plant, rake.section) in raw_rules.SIDING_SHOWN else None
+        rake.location =station_label((rake.crnt_locn or "").strip().upper())
+        rake.loaded = (rake.ldng_time or "").strip() or "No date"  # Date and time, as FOIS shows them
+        rake.stabled = is_stabled(rake)
+
+    sections = [section for section, _ in raw_rules.SECTIONS]
+    rakes.sort(key=lambda r: (PLANTS.index(r.plant), sections.index(r.section),
+                              r.distance_km is None, r.distance_km or 0, r.rake_id or ""))
+    if plant:
+        rakes = [rake for rake in rakes if rake.plant == plant]
+    return {
+        "imported_at": imported_at,
+        "rakes": [rake for rake in rakes if not (missing_only and rake.parts) or rake.anchor == keep],
+        "summary": raw_rules.summary(rakes, PLANTS),
+        "tonnes_per_wagon": raw_rules.TONNES_PER_WAGON,
+        "suggestions": {section: sorted(names.values(), key=str.casefold) for section, names in suggestions.items()},
+        "plants": PLANTS,
+        "plant": plant,
+        "missing_only": missing_only,
+    }
+
+RAKE_GONE = "This rake is no longer in the latest list. Check it below and enter it again."
+
+def save_sub_commodities(form):
+    """Save or remove the sub-commodity lines typed for one rake of the latest list. Returns
+    (the rake's anchor, errors); the anchor is None when the rake isn't in the list."""
+    trip = (form.get("rake_id", "").strip(), form.get("sttn_from", "").strip().upper(),
+            form.get("ldng_time", "").strip())
+    session = SessionDB()
+    try:
+        _, rakes = latest_raw_material_rakes(session)
+        rake = next((r for r in rakes if trip[0] and raw_rules.trip_key(r) == trip), None)
+        if rake is None:
+            return None, [RAKE_GONE]
+        section = raw_material_section(rake)
+        lines = []
+        if form.get("action") != "remove":
+            known = [name for (name,) in session.query(RakeSubCommodity.sub_commodity)
+                     .filter(RakeSubCommodity.section == section).order_by(RakeSubCommodity.id)]
+            lines, errors = raw_rules.check_lines(
+                form.getlist("sub_commodity"), form.getlist("wagons"), raw_rules.wagon_count(rake.totl_unts), known)
+            if errors:
+                return rake_anchor(trip), errors
+
+        session.query(RakeSubCommodity).filter_by(rake_id=trip[0], sttn_from=trip[1], ldng_time=trip[2]).delete()
+        entered_at = datetime.now(IST).replace(tzinfo=None)
+        session.add_all(
+            RakeSubCommodity(
+                rake_id=trip[0], sttn_from=trip[1], ldng_time=trip[2], sttn_to=rake.sttn_to.strip().upper(),
+                line_no=number, section=section, sub_commodity=name, wagons=wagons, entered_at=entered_at,
+            )
+            for number, (name, wagons) in enumerate(lines, 1)
+        )
+        session.commit()
+        return rake_anchor(trip), []
+    finally:
+        session.close()
+
+@app.route("/raw_materials", methods=["GET", "POST"])
+def raw_material_status():
+    """Loaded ore and coal rakes plant by plant, with their sub-commodities, and their entry."""
+    values = request.form if request.method == "POST" else request.args
+    plant, missing_only = values.get("plant", ""), values.get("missing") == "1"
+    if request.method == "GET":
+        data = raw_material_data(plant, missing_only, keep=request.args.get("saved", ""))
+        return render_template("raw_materials.html", **data)
+
+    anchor, errors = save_sub_commodities(request.form)
+    if not errors:
+        return redirect(url_for(
+            "raw_material_status", plant=plant or None, missing="1" if missing_only else None,
+            saved=anchor if missing_only else None, _anchor=anchor), 303)
+    # Show the page again: the rake's form with what was typed, or a notice if the rake has gone.
+    failed = anchor and {
+        "anchor": anchor, "errors": errors,
+        "lines": list(zip_longest(request.form.getlist("sub_commodity"), request.form.getlist("wagons"), fillvalue="")),
+    }
+    data = raw_material_data(plant, missing_only, keep=anchor or "")
+    page = render_template("raw_materials.html", failed=failed, notice=None if anchor else errors[0], **data)
+    return page, 400 if anchor else 409
 
 @app.route("/inbound/extension.zip")
 def inbound_extension():
@@ -2034,8 +2222,7 @@ def rakes_in_transit(session, commodity="", plant=""):
     for cmdt, yard, source, loaded_empty in rows:
         if (loaded_empty or "").strip().upper() == "E":
             continue
-        # Sources are named as on the page's rows, which show the station mappings' names.
-        source = get_station_display_name((source or "").strip().upper()) or "—"
+        source = (source or "").strip().upper()
         key = (commodity_name(cmdt), DESTINATION_PLANTS[yard.strip().upper()], source)
         if (not commodity or key[0] == commodity) and (not plant or key[1] == plant):
             counts[key] += 1
@@ -2064,8 +2251,9 @@ def commodity_analysis_data(selected_commodity="", selected_destination=""):
     
     # Get all data
     all_rows = query.all()
-    df = query_to_df(all_rows)
-    
+    # Rows are counted by station code, as codes can share a name; names are added at the end.
+    df = query_to_df(all_rows, source_name=lambda code: (code or "").strip().upper())
+
     # Prepare data structure for display
     analysis_data = []
     
@@ -2303,6 +2491,9 @@ def commodity_analysis_data(selected_commodity="", selected_destination=""):
             'best_fortnightly': None, 'best_fortnightly_count': 0,
             'best_weekly': None, 'best_weekly_count': 0,
         })
+    for item in analysis_data:
+        item['source_code'] = item['source']
+        item['source'] = station_label(item['source_code'])
     analysis_data.sort(key=lambda item: item['source'])
 
     # Group data by commodity and destination for display
@@ -2414,8 +2605,8 @@ def source_outliers(source_station):
         query = query.filter(Rake.sttn_to == destination)
     
     rows = query.all()
-    df = query_to_df(rows)
-    
+    df = query_to_df(rows, source_name=station_label)
+
     outliers_df = pd.DataFrame()
     total_records = 0
     
@@ -2437,7 +2628,7 @@ def source_outliers(source_station):
     
     return render_template(
         "source_outliers.html",
-        source_station=source_station,
+        source_station=station_label(source_station),
         outliers=outliers_df.to_dict('records') if not outliers_df.empty else [],
         outlier_count=len(outliers_df),
         total_records=total_records,

@@ -66,9 +66,12 @@ def as_on(data):
 
 
 def title_lines(data):
-    title = "Rakes in Transit" + (f" to {data['destination']}" if data["destination"] else "")
+    consignee = f"{data['cnsg']} " if data["cnsg"] else ""
+    title = f"{consignee}Rakes in Transit" + (f" to {data['destination']}" if data["destination"] else "")
     shown = len(data["rakes"])
-    summary = f"{as_on(data)}. {shown} rakes to the plants and pellet agents."
+    summary = f"{as_on(data)}. {shown} {consignee}rakes to the plants and pellet agents."
+    if consignee:
+        summary += f" Only rakes with consignee (CNSG) {data['cnsg']} are included."
     if data["stabled_count"]:
         summary += f" {data['stabled_count']} stabled (status ST)."
     summary += f" Km left is available for {data['rakes_with_distance']} of {shown} rakes."

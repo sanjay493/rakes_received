@@ -1,0 +1,191 @@
+{% extends "base.html" %}
+
+{% macro entry_line(list_id, name, count) %}
+<div class="rm-line">
+    <input type="text" name="sub_commodity" list="{{ list_id }}" value="{{ name }}" maxlength="80" placeholder="Sub-commodity" aria-label="Sub-commodity" autocomplete="off">
+    <input type="number" name="wagons" value="{{ count }}" min="1" step="1" placeholder="Wagons" aria-label="Wagons">
+</div>
+{% endmacro %}
+
+{# The HTML id of a plant-commodity heading in the rake list. #}
+{% macro group_id(plant, section) %}rakes-{{ plant }}-{{ section|lower|replace(' ', '-') }}{% endmacro %}
+
+{% block content %}
+{% set missing = '1' if missing_only else None %}
+<style>
+    .rm-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    .rm-table th, .rm-table td { padding: 6px 8px; text-align: left; vertical-align: top; border-bottom: 1px solid #e4e7eb; overflow-wrap: break-word; }
+    .rm-table thead th { background: #1f3a5f; color: white; }
+    .rm-table .num { text-align: right; }
+    .rm-table tr.rm-group th { background: #e8eef5; color: #1f3a5f; font-size: 14px; border-top: 2px solid #1f3a5f; }
+    .rm-table tr.rm-total td { background: #f5f8fb; font-weight: bold; }
+    .rm-table tr.rm-stabled td { background: #fef3f2; }
+    .rm-missing { color: #b54708; font-weight: bold; }
+    .rm-warn { color: #b42318; font-weight: bold; white-space: nowrap; }
+    .rm-table tr.rm-entry td { padding-top: 0; }
+    .rm-entry summary { cursor: pointer; color: #1f3a5f; font-weight: bold; padding: 2px 0; }
+    .rm-line { display: flex; gap: 8px; max-width: 460px; }
+    .rm-line input[name=sub_commodity] { flex: 1; min-width: 0; }
+    .rm-line input[name=wagons] { width: 90px; flex: none; }
+    .rm-buttons { display: flex; flex-wrap: wrap; gap: 8px; }
+    .rm-buttons button { min-width: 0; padding: 8px 14px; }
+    .rm-errors { color: #b42318; font-weight: bold; margin: 6px 0; padding-left: 18px; }
+    html { scroll-behavior: smooth; }
+    .rm-table th a { color: #1f3a5f; white-space: nowrap; }
+    .rm-table tr.rm-group { scroll-margin-top: 8px; }
+    .rm-table tr.rm-group:target th { background: #ffe9a8; }  /* The group just jumped to */
+
+    /* Phones: each rake becomes a card with its column names beside the values. */
+    @media (max-width: 700px) {
+        .rm-rakes, .rm-rakes tbody, .rm-rakes tr, .rm-rakes td, .rm-rakes th { display: block; }
+        .rm-rakes thead { display: none; }
+        .rm-rakes tr.rm-rake { border: 1px solid #e4e7eb; border-radius: 6px 6px 0 0; margin-top: 8px; padding: 4px 0; }
+        .rm-rakes tr.rm-rake td { display: grid; grid-template-columns: 110px 1fr; gap: 8px; border: 0; padding: 2px 10px; text-align: left; }
+        .rm-rakes tr.rm-rake td::before { content: attr(data-label); color: #52606d; }
+        .rm-rakes tr.rm-rake.rm-stabled { background: #fef3f2; }
+        .rm-rakes tr.rm-entry td { border: 1px solid #e4e7eb; border-top: 0; border-radius: 0 0 6px 6px; padding: 4px 10px; }
+    }
+</style>
+
+<div class="card">
+    <h2 style="margin-top: 0;">Raw Material Status</h2>
+    {% if imported_at %}
+    <p style="margin-bottom: 0;">Loaded Iron Ore, Coal and Imported Coal rakes of consignee SAIL to the plants in the In-Bound list received from FOIS on {{ imported_at.strftime('%d-%m-%Y %H:%M') }} IST.</p>
+    <div class="unit-buttons">
+        <a class="unit-btn {% if not plant %}active{% endif %}" href="{{ url_for('raw_material_status', missing=missing) }}">All plants</a>
+        {% for name in plants %}
+        <a class="unit-btn {% if plant == name %}active{% endif %}" href="{{ url_for('raw_material_status', plant=name, missing=missing) }}">{{ name }}</a>
+        {% endfor %}
+        <a class="unit-btn {% if missing_only %}active{% endif %}" href="{{ url_for('raw_material_status', plant=plant or None, missing=None if missing_only else '1') }}">Show only not entered</a>
+    </div>
+    {% else %}
+    <p style="margin-bottom: 0;">No In-Bound list has been received yet. Open the Loaded In-Bound report on FOIS and send it with the Chrome extension.</p>
+    {% endif %}
+</div>
+
+{% if notice %}
+<div class="card rm-warn" style="white-space: normal; border-left: 4px solid #b42318;" role="alert">{{ notice }}</div>
+{% endif %}
+
+{% if summary %}
+<div class="card">
+    <h3 style="margin-top: 0;">Summary by Sub-commodity</h3>
+    <p style="margin: 0 0 12px; color: #52606d; font-size: 13px;">Rakes are counted by wagon share: 24 wagons of a 58-wagon rake is 24/58 = 0.41 rake. Tonnage is wagons × {{ tonnes_per_wagon }} T.</p>
+    <div style="overflow-x: auto;">
+    <table class="rm-table">
+        <thead>
+            <tr><th>Commodity</th><th>Plant</th><th>Sub-commodity</th><th class="num">Rakes</th><th class="num">Wagons</th><th class="num">Tonnage (T)</th></tr>
+        </thead>
+        <tbody>
+            {% for block in summary %}
+            {% for line in block.lines %}
+            <tr>
+                {% if loop.first %}
+                {% if block.section_rows %}<th rowspan="{{ block.section_rows }}">{{ block.section }}</th>{% endif %}
+                {# To this plant's rakes of the commodity below; to the full list if the filter is hiding any. #}
+                {% set listed = rakes|selectattr('plant', 'equalto', block.plant)|selectattr('section', 'equalto', block.section)|list|length %}
+                {% set group = group_id(block.plant, block.section) %}
+                <th rowspan="{{ block.lines|length + 1 }}"><a href="{{ '#' ~ group if listed >= block.rakes else url_for('raw_material_status', plant=plant or None, _anchor=group) }}" title="Show {{ block.plant }} {{ block.section }} rakes">{{ block.plant }} &darr;</a></th>
+                {% endif %}
+                <td{% if line.name == 'Not entered' %} class="rm-missing"{% endif %}>{{ line.name }}</td>
+                <td class="num">{{ '%.2f'|format(line.rakes) }}</td>
+                <td class="num">{{ line.wagons }}</td>
+                <td class="num">{{ line.tonnes }}</td>
+            </tr>
+            {% endfor %}
+            <tr class="rm-total">
+                <td>Total</td>
+                <td class="num">{{ '%.2f'|format(block.rakes) }}</td>
+                <td class="num">{{ block.wagons }}</td>
+                <td class="num">{{ block.tonnes }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    </div>
+</div>
+{% endif %}
+
+{% if rakes %}
+<div class="card">
+    <h3 style="margin-top: 0;">Rakes</h3>
+    <table class="rm-table rm-rakes">
+        <thead>
+            <tr><th>Loaded</th><th>Source</th><th>Sub-commodity</th><th class="num">Wagons</th><th>Now at</th><th class="num">Km left</th><th>Status</th><th>Rake ID</th></tr>
+        </thead>
+        <tbody>
+            {% for rake in rakes %}
+            {% if loop.changed(rake.plant, rake.section) %}
+            <tr class="rm-group" id="{{ group_id(rake.plant, rake.section) }}"><th colspan="8">{{ rake.plant }} · {{ rake.section }}</th></tr>
+            {% endif %}
+            <tr class="rm-rake{% if rake.stabled %} rm-stabled{% endif %}" id="{{ rake.anchor }}">
+                <td data-label="Loaded">{{ rake.loaded }}</td>
+                <td data-label="Source">{{ rake.source }}{% if rake.siding %} &rarr; {{ rake.siding }}{% endif %}</td>
+                <td data-label="Sub-commodity"><span>
+                    {% if not rake.parts %}<span class="rm-missing">Not entered</span>
+                    {% elif rake.parts|length == 1 and rake.parts[0][1] == rake.wagons %}{{ rake.parts[0][0] }}
+                    {% else %}{% for name, count in rake.parts %}{% if not loop.first %} + {% endif %}{{ name }} {{ count }}{% endfor %}{% endif %}
+                    {% if rake.check_wagons %}<span class="rm-warn">check wagons</span>{% endif %}
+                </span></td>
+                <td data-label="Wagons" class="num">{{ rake.wagons if rake.wagons is not none else '—' }}</td>
+                <td data-label="Now at">{{ rake.location }}</td>
+                <td data-label="Km left" class="num">{{ rake.distance_km|round|int if rake.distance_km is not none else '—' }}</td>
+                <td data-label="Status">{{ rake.stts_code or '' }}{% if rake.stabled %} <span class="rm-warn">(stabled)</span>{% endif %}</td>
+                <td data-label="Rake ID">{{ rake.rake_id or '—' }}</td>
+            </tr>
+            {% if rake.can_enter %}
+            {% set retry = failed if failed and failed.anchor == rake.anchor else None %}
+            {% set list_id = 'rm-list-' ~ rake.section|lower|replace(' ', '-') %}
+            <tr class="rm-entry">
+                <td colspan="8">
+                    <details{% if retry %} open{% endif %}>
+                        <summary>{{ 'Edit' if rake.parts else 'Add' }}</summary>
+                        <form method="post" action="{{ url_for('raw_material_status') }}#{{ rake.anchor }}" data-list="{{ list_id }}">
+                            <input type="hidden" name="rake_id" value="{{ rake.rake_id }}">
+                            <input type="hidden" name="sttn_from" value="{{ rake.sttn_from or '' }}">
+                            <input type="hidden" name="ldng_time" value="{{ rake.ldng_time or '' }}">
+                            <input type="hidden" name="plant" value="{{ plant }}">
+                            <input type="hidden" name="missing" value="{{ missing or '' }}">
+                            {% if retry %}<ul class="rm-errors" role="alert">{% for error in retry.errors %}<li>{{ error }}</li>{% endfor %}</ul>{% endif %}
+                            <div class="rm-lines">
+                                {% for name, count in (retry.lines if retry and retry.lines else rake.parts or [('', rake.wagons or '')]) %}
+                                {{ entry_line(list_id, name, count) }}
+                                {% endfor %}
+                            </div>
+                            <div class="rm-buttons">
+                                <button type="submit" name="action" value="save">Save</button>
+                                <button type="button" class="rm-add">+ Add another</button>
+                                {% if rake.parts %}<button type="submit" name="action" value="remove">Remove entry</button>{% endif %}
+                            </div>
+                        </form>
+                    </details>
+                </td>
+            </tr>
+            {% endif %}
+            {% endfor %}
+        </tbody>
+    </table>
+    {% for section, names in suggestions.items() %}
+    <datalist id="rm-list-{{ section|lower|replace(' ', '-') }}">
+        {% for name in names %}<option value="{{ name }}"></option>{% endfor %}
+    </datalist>
+    {% endfor %}
+    <template id="rm-line-template">{{ entry_line('', '', '') }}</template>
+</div>
+<script>
+    // "+ Add another" adds an empty line to its rake's form, for a mixed load.
+    document.addEventListener("click", (event) => {
+        const button = event.target.closest(".rm-add");
+        if (!button) return;
+        const form = button.closest("form");
+        const line = document.getElementById("rm-line-template").content.firstElementChild.cloneNode(true);
+        const name = line.querySelector("[name=sub_commodity]");
+        name.setAttribute("list", form.dataset.list);
+        form.querySelector(".rm-lines").append(line);
+        name.focus();
+    });
+</script>
+{% elif imported_at %}
+<div class="card">{% if missing_only %}Every rake here has its sub-commodity entered.{% else %}No loaded ore or coal rakes in this list.{% endif %}</div>
+{% endif %}
+{% endblock %}
