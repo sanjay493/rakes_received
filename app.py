@@ -993,8 +993,9 @@ def save_rake_trips(records):
 @app.route("/api/rake_ids")
 def rake_ids():
     """The SAIL BOBSNM1 Rake IDs seen in the In-Bound lists and the saved trips, for the extension."""
-    if not api_token_valid():
-        return jsonify(error="Invalid or missing API token"), 401
+    error = api_token_error()
+    if error:
+        return error
 
     def trimmed(column):
         return func.upper(func.trim(func.coalesce(column, "")))
@@ -1018,8 +1019,9 @@ def rake_ids():
 def import_rake_trips():
     """Save trips the extension fetched: {"source": "rr", "rake_id", "rows"} for one rake's "Get RR"
     rows, or {"source": "received", "columns", "rows"} for Rakes Received rows."""
-    if not api_token_valid():
-        return jsonify(error="Invalid or missing API token"), 401
+    error = api_token_error()
+    if error:
+        return error
 
     data = request.get_json(silent=True)
     if not isinstance(data, dict) or data.get("source") not in ("rr", "received"):

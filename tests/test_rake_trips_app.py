@@ -45,6 +45,12 @@ def test_both_endpoints_need_the_token(client):
     assert count(rakes_app.RakeTrip) == 0
 
 
+def test_both_endpoints_say_when_the_server_has_no_token(client, monkeypatch):
+    monkeypatch.setattr(rakes_app, "API_TOKEN", None)
+    for response in (client.get("/api/rake_ids", headers=AUTH), send_rr(client, [LOADED])):
+        assert response.status_code == 503 and "no API_TOKEN set" in response.get_json()["error"]
+
+
 def test_endpoints_skip_the_site_password(client, monkeypatch):
     monkeypatch.setattr(rakes_app, "APP_PASSWORD", "secret")
     assert client.get("/api/rake_ids", headers=AUTH).status_code == 200
