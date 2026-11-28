@@ -1,0 +1,65 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Rake trips</title>
+  <style>
+    body { max-width: 560px; margin: 24px auto; padding: 0 14px; font: 14px system-ui, sans-serif; color: #1f2933; background: #fff; }
+    h1 { margin: 0 0 14px; font-size: 18px; }
+    p { margin: 10px 0; overflow-wrap: anywhere; }
+    label { display: block; margin-bottom: 4px; font-weight: 600; }
+    input[type="password"], input[type="date"], input[type="text"] { box-sizing: border-box; width: 100%; padding: 6px; font: inherit; }
+    .field { margin-bottom: 10px; }
+    .row { display: flex; gap: 10px; align-items: flex-end; }
+    .row > * { flex: 1; }
+    .row button { flex: 0 0 auto; }
+    .choice { display: flex; gap: 8px; align-items: center; font-weight: normal; }
+    #rakes { max-height: 220px; overflow: auto; margin-bottom: 10px; padding: 8px; border: 1px solid #d9e2ec; }
+    button { padding: 8px 14px; font: inherit; font-weight: 600; cursor: pointer; }
+    button:disabled { cursor: default; }
+    #run { width: 100%; margin-top: 4px; }
+    #results { padding-left: 18px; }
+    #results li { margin-bottom: 4px; overflow-wrap: anywhere; }
+    .error { color: #b42318; }
+    .success { color: #05603a; }
+    .note { font-size: 12px; color: #52606d; }
+  </style>
+</head>
+<body>
+  <h1>BOBSNM1 rake trips</h1>
+
+  <div class="field">
+    <label for="token">API token</label>
+    <input id="token" type="password" autocomplete="off">
+  </div>
+
+  <div class="field row">
+    <div><label for="from">From</label><input id="from" type="date"></div>
+    <div><label for="to">To</label><input id="to" type="date"></div>
+  </div>
+
+  <div class="field">
+    <label class="choice"><input id="modeAll" type="radio" name="mode" checked> All BOBSNM1 rakes</label>
+    <label class="choice"><input id="modeTicked" type="radio" name="mode"> Ticked Rake IDs</label>
+  </div>
+
+  <div id="rakes"></div>
+
+  <div class="field row">
+    <div><label for="addId">Add Rake ID</label><input id="addId" type="text" autocomplete="off"></div>
+    <button id="add" type="button">Add</button>
+  </div>
+
+  <button id="run" type="button">Fetch and send</button>
+  <p id="status"></p>
+  <ul id="results"></ul>
+
+  <p class="note">Keep a logged-in FOIS e-Customer tab and the dashboard open, and leave this tab open until it
+    says it is done. Rakes Received covers arrivals at your login's stations, by received date; Get RR covers
+    rakes with RR data, by invoice date. A movement can appear from both.</p>
+
+  <script src="trips_logic.js"></script>
+  <script src="foisfetch.js"></script>
+  <script src="trips.js"></script>
+</body>
+</html>

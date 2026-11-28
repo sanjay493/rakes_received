@@ -18,6 +18,7 @@ import commodity_exports
 import indent_exports
 import indents as indent_rules
 import raw_materials as raw_rules
+import rake_trips as trip_rules
 
 # ------------------ APP SETUP ------------------
 
@@ -80,6 +81,7 @@ def require_login():
     # The import endpoints check API_TOKEN themselves.
     if not APP_PASSWORD or request.endpoint in (
         "healthz", "import_rakes", "import_inbound", "import_odr", "import_distances", "import_station_names",
+        "rake_ids", "import_rake_trips",
     ):
         return None
 
@@ -242,6 +244,41 @@ class StationLookup(Base):
     code = Column(String, primary_key=True)
     name = Column(String)
     fetched_at = Column(DateTime, nullable=False)
+
+class RakeTrip(Base):
+    """One movement of a rake, from FOIS "Get RR" (source "rr") or the Rakes Received report
+    ("received"). rake_trips.py describes how rows are read; trip_key identifies a trip."""
+    __tablename__ = "rake_trips"
+
+    id = Column(Integer, primary_key=True)
+    trip_key = Column(String, unique=True, nullable=False)
+    rake_id = Column(String, index=True, nullable=False)
+    source = Column(String, nullable=False)
+    rake_name = Column(String)
+    rake_type = Column(String)
+    units = Column(String)
+    sttn_from = Column(String)
+    sttn_to = Column(String)
+    loaded_empty = Column(String)
+    trip_date = Column(Date, index=True)
+    dispatched_time = Column(DateTime)
+    received_time = Column(DateTime)
+    invoice_no = Column(String)
+    invoice_date = Column(Date)
+    rr_no = Column(String)
+    rr_date = Column(Date)
+    cnsr = Column(String)
+    cnsg = Column(String)
+    cmdt = Column(String)
+    chargeable_wt = Column(Float)
+    distance_km = Column(Float)
+    freight_class = Column(String)
+    rate = Column(Float)
+    rebate_pct = Column(Float)
+    rebate_amt = Column(Float)
+    used_by = Column(String)
+    rebate_head = Column(String)
+    imported_at = Column(DateTime, nullable=False)
 
 Base.metadata.create_all(engine)
 SessionDB = sessionmaker(bind=engine)
@@ -913,6 +950,87 @@ def import_station_names():
         station_mappings.update(added)
         save_mappings(STATION_MAPPINGS_FILE, station_mappings)
     return jsonify(saved=saved, added=len(added))
+
+# ------------------ RAKE TRIPS ------------------
+
+TRIP_KEY_CHUNK = 500  # Keys looked up per query, within SQLite's parameter limit
+
+def save_rake_trips(records):
+    """Add trips, or update those already saved under the same trip_key. Returns (new, updated)."""
+    trips = {record["trip_key"]: record for record in records}  # The last of a repeated trip wins
+    keys = list(trips)
+    imported_at = datetime.now(IST).replace(tzinfo=None)
+    session = SessionDB()
+    try:
+        saved = {}
+        for start in range(0, len(keys), TRIP_KEY_CHUNK):
+            chunk = keys[start:start + TRIP_KEY_CHUNK]
+            saved.update((trip.trip_key, trip) for trip in
+                         session.query(RakeTrip).filter(RakeTrip.trip_key.in_(chunk)))
+        for key, record in trips.items():
+            if key in saved:
+                for name, value in record.items():
+                    setattr(saved[key], name, value)
+                saved[key].imported_at = imported_at
+            else:
+                session.add(RakeTrip(imported_at=imported_at, **record))
+        session.commit()
+    finally:
+        session.close()
+    return len(trips) - len(saved), len(saved)
+
+@app.route("/api/rake_ids")
+def rake_ids():
+    """The SAIL BOBSNM1 Rake IDs seen in the In-Bound lists and the saved trips, for the extension."""
+    if not api_token_valid():
+        return jsonify(error="Invalid or missing API token"), 401
+
+    def trimmed(column):
+        return func.upper(func.trim(func.coalesce(column, "")))
+
+    session = SessionDB()
+    try:
+        listed = session.query(InboundRake.rake_id).filter(
+            trimmed(InboundRake.load_type) == WAGON_PAGE_TYPE, trimmed(InboundRake.cnsg) == SAIL_CONSIGNEE,
+        ).distinct().all()
+        travelled = session.query(RakeTrip.rake_id).filter(
+            trimmed(RakeTrip.cnsg) == SAIL_CONSIGNEE,
+            (RakeTrip.rake_type.is_(None)) | (trimmed(RakeTrip.rake_type) == WAGON_PAGE_TYPE),
+        ).distinct().all()
+    finally:
+        session.close()
+
+    found = {trip_rules.clean_rake_id(rake_id) for (rake_id,) in listed + travelled}
+    return jsonify(rake_ids=sorted(found - {None}))
+
+@app.route("/api/rake_trips", methods=["POST"])
+def import_rake_trips():
+    """Save trips the extension fetched: {"source": "rr", "rake_id", "rows"} for one rake's "Get RR"
+    rows, or {"source": "received", "columns", "rows"} for Rakes Received rows."""
+    if not api_token_valid():
+        return jsonify(error="Invalid or missing API token"), 401
+
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict) or data.get("source") not in ("rr", "received"):
+        return jsonify(error='Expected JSON with source "rr" or "received"'), 400
+    rows = data.get("rows")
+    if not isinstance(rows, list) or not rows:
+        return jsonify(error="Expected JSON with rows"), 400
+
+    if data["source"] == "rr":
+        if not trip_rules.clean_rake_id(data.get("rake_id")):
+            return jsonify(error="Expected a rake_id"), 400
+        records, unreadable = trip_rules.read_rr_rows(data["rake_id"], rows)
+    else:
+        if not isinstance(data.get("columns"), list):
+            return jsonify(error="Expected JSON with columns and rows"), 400
+        try:
+            records, unreadable = trip_rules.read_received_rows(data["columns"], rows)
+        except ValueError as e:
+            return jsonify(error=f"Could not read the table: {e}"), 400
+
+    new, updated = save_rake_trips(records)
+    return jsonify(received=len(rows), new=new, updated=updated, unreadable=unreadable)
 
 # ------------------ NEW: API ENDPOINTS FOR DYNAMIC FILTERS ------------------
 

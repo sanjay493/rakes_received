@@ -140,6 +140,28 @@ To send the Loaded In-Bound list automatically every 5 hours:
 
 Every 5 hours the extension then reloads the report in that tab, waits for it to finish loading and sends it. It can't log in to FOIS: if the report doesn't come back after the reload (FOIS logged out, or the tab was closed), nothing is sent, the icon shows a red **!** and the popup says why. Chrome, the FOIS tab and the dashboard must be left running, and the computer must stay awake. After Chrome restarts, the extension looks for the report in any open tab of the same site. Untick the box to stop. To change the interval, edit `PERIOD_MINUTES` in `background.js`.
 
+### Rake trips
+
+To collect the trips of `BOBSNM1` rakes by Rake ID:
+
+1. Keep the dashboard running and FOIS e-Customer open and logged in, in any tab.
+2. Click the extension icon, then **Rake trips**. It opens in its own tab.
+3. Choose the **From** and **To** dates, and **All BOBSNM1 rakes** or **Ticked Rake IDs** (use **Add Rake ID** for one that isn't listed).
+4. Click **Fetch and send**, and leave the tab open until it says it's done.
+
+The listed IDs are consignee SAIL's `BOBSNM1` Rake IDs from the In-Bound lists and from trips already saved. The page first fetches the Rakes Received report for all your login's stations, loaded and empty, one calendar month at a time, then runs FOIS "Get RR" for each chosen rake with the agreement left blank. Both requests run inside your FOIS tab without changing what's on screen, 1.5 seconds apart. It stops after 3 failures in a row, such as when FOIS has logged out.
+
+Trips are saved in the `rake_trips` table, with `source` `received` or `rr`; sending the same trip again updates it. Keep in mind:
+
+- Rakes Received only has arrivals at your stations, and its period is by received date. FOIS doesn't offer all past months.
+- "Get RR" only has data for some rakes (those in the GPWIS list when this was written). Its period is by invoice date. It has no departure or arrival times.
+- One movement can be saved from both sources, so count one `source` at a time or allow for the overlap.
+- "Get RR" doesn't say whether a trip was loaded: `ZERO FREIGHT RR` with no commodity is stored as empty (`E`), anything else as loaded (`L`).
+
+There's no page on the dashboard for these trips yet.
+
+### Reports read from the page
+
 It recognises three reports by their headings:
 
 | Report | Required headings | What happens on send |
@@ -179,4 +201,4 @@ The **Pending Indents** page (`/indents`) shows the latest "ODR Wise Rake Outsta
 
 The tests run against a copy of the database in a temporary folder.
 
-If the site moves to another address, update `REPORTS` in `popup.js`, `INBOUND_URL` in `background.js`, the URLs in `lookup.js` and `host_permissions` in `manifest.json`.
+If the site moves to another address, update `REPORTS` in `popup.js`, `INBOUND_URL` in `background.js`, the URLs in `lookup.js` and `trips.js`, and `host_permissions` in `manifest.json`.

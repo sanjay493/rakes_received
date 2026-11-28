@@ -176,6 +176,7 @@ async function init() {
   sendEl.addEventListener("click", send);
   autoEl.addEventListener("change", toggleAuto);
   runNowEl.addEventListener("click", runNow);
+  document.getElementById("trips").addEventListener("click", () => chrome.tabs.create({ url: "trips.html" }));
 
   try {
     await findTable();
