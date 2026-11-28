@@ -761,11 +761,20 @@ def api_token_valid():
     token = auth.token if auth and auth.type == "bearer" else None
     return bool(API_TOKEN and token and hmac.compare_digest(token.encode(), API_TOKEN.encode()))
 
+def api_token_error():
+    """None if the request carries the right API token, else the error response to return."""
+    if not API_TOKEN:
+        return jsonify(error="The server has no API_TOKEN set. Set the API_TOKEN environment variable and restart the app."), 503
+    if not api_token_valid():
+        return jsonify(error="Invalid or missing API token"), 401
+    return None
+
 def read_import_request():
     """Check the API token and read {"columns": [...], "rows": [[...], ...]} from the request.
     Returns (data, None), or (None, error response)."""
-    if not api_token_valid():
-        return None, (jsonify(error="Invalid or missing API token"), 401)
+    error = api_token_error()
+    if error:
+        return None, error
 
     data = request.get_json(silent=True)
     if not isinstance(data, dict) or not data.get("columns") or not data.get("rows"):
@@ -883,11 +892,12 @@ def import_odr():
 def import_distances():
     """Save distances the extension looked up: {"distances": [{"from", "to", "km"}, ...]}.
     An empty km means RBS doesn't know the station, so it won't be looked up again."""
-    if not api_token_valid():
-        return jsonify(error="Invalid or missing API token"), 401
+    error = api_token_error()
+    if error:
+        return error
 
     data = request.get_json(silent=True)
-    distances = data.get("distances") if isinstance(data, dict) else None
+    distances =data.get("distances") if isinstance(data, dict) else None
     if not isinstance(distances, list):
         return jsonify(error="Expected JSON with distances"), 400
 
@@ -916,11 +926,12 @@ def import_station_names():
     """Save station names the extension read from FOIS Station Help: {"stations": [{"code", "name"}, ...]}.
     An empty name means FOIS doesn't know the code, so it won't be looked up again. A name already in
     the station mappings is kept, so names typed on the config page win."""
-    if not api_token_valid():
-        return jsonify(error="Invalid or missing API token"), 401
+    error = api_token_error()
+    if error:
+        return error
 
     data = request.get_json(silent=True)
-    stations = data.get("stations") if isinstance(data, dict) else None
+    stations =data.get("stations") if isinstance(data, dict) else None
     if not isinstance(stations, list):
         return jsonify(error="Expected JSON with stations"), 400
 
